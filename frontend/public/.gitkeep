@@ -1,0 +1,4 @@
+# 静态资源目录(favicon / logo / robots.txt 等)
+#
+# 这里的文件会被 Vite 原样拷贝到 dist/。
+# index.html 中已引用 /favicon.svg,后续放上即可。

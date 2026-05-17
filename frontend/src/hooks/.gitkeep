@@ -1,0 +1,4 @@
+# 自定义 hooks 目录
+#
+# 例:use-confirm / use-hotkeys / use-media-query / use-log-stream(SSE)
+# 设计契约:`进度/设计/前端UI设计.md` § 6.3、§ 9。

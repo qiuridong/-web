@@ -1,0 +1,134 @@
+# =========================================
+# 签到脚本聚合管理面板 · .gitignore
+# =========================================
+# ⚠️ data/encryption.key 是主密钥,丢失=所有加密配置作废,绝不入 git
+# ⚠️ data/ 是运行时数据卷,SQLite + key 都在里面,整体不入 git
+# =========================================
+
+# ===== 应用运行时数据 =====
+# ⚠️ 关键!encryption.key 是主密钥(Fernet),db.sqlite3 含用户密码 hash + 加密 cookie
+# 两个路径都要拦:根 data/ 是规划路径,backend/data/ 是 dev/test 实际产生路径
+/data/
+!/data/.gitkeep
+/backend/data/
+!/backend/data/.gitkeep
+
+# ===== 应用日志 =====
+/logs/
+!/logs/.gitkeep
+/backend/logs/
+!/backend/logs/.gitkeep
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.pytype/
+
+# Python 虚拟环境
+.venv/
+venv/
+env/
+ENV/
+backend/.venv/
+
+# uv
+.uv-cache/
+
+# ===== Node / Frontend =====
+node_modules/
+.pnp/
+.pnp.js
+.yarn/
+.npm/
+.pnpm-store/
+
+# 构建输出
+frontend/dist/
+frontend/dist-ssr/
+*.local
+
+# Vite
+.vite/
+frontend/.vite/
+
+# 测试
+/coverage/
+frontend/coverage/
+
+# ===== IDE / Editor =====
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# ===== 临时文件 =====
+*.tmp
+*.bak
+*.log
+*.pid
+*.seed
+*.pid.lock
+
+# ===== 环境变量(.env.example 入 git,真实 .env 不入)=====
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# ===== Docker =====
+# docker-compose.override.yml 是开发者本地覆盖,不入 git
+docker-compose.override.yml
+docker-compose.override.yaml
+
+# ===== Caddy 运行时(在 docker volume,不在源码里;以防万一)=====
+/caddy_data/
+/caddy_config/
+
+# ===== 备份输出(restic 仓库等)=====
+/backups/
+
+# ===== 用户脚本的子 venv (本机调试时可能产生)=====
+scripts/*/.venv/
+scripts/*/__pycache__/
+scripts/*/*.pyc
+
+# ===== OS =====
+.AppleDouble
+.LSOverride
+Icon
+
+# ===== shadcn / TanStack 等可能产生的临时缓存 =====
+.turbo/
+.next/
+.svelte-kit/
+
+# ===== 临时手稿 / 探测脚本 =====
+/_tmp_*.md
+/_tmp_*.txt
+# backend/ 根下的 _verify_*.py / _probe_*.py 是集成 review 期间的临时探测脚本
+# 写到 backend/tests/smoke/ 才入 git,根目录这些视为本地工具
+backend/_verify_*.py
+backend/_probe_*.py
+backend/_tmp_*.py

@@ -1,0 +1,6 @@
+# shadcn/ui 组件目标目录
+#
+# 由 `pnpm dlx shadcn@latest add <name>` 命令填充。
+# 详见 components.json(aliases.ui = "@/components/ui")。
+#
+# TODO(Batch 4 / Frontend-Foundation agent):一次性 add 30 个基础组件,见前端UI设计.md § 11.3。

@@ -1,0 +1,39 @@
+# 依赖
+node_modules
+.pnpm-store
+
+# 构建产物
+dist
+dist-ssr
+*.local
+
+# Vite 缓存
+.vite
+
+# 测试覆盖率
+coverage
+.nyc_output
+
+# 环境变量
+.env
+.env.local
+.env.*.local
+
+# 编辑器/系统
+.DS_Store
+Thumbs.db
+.idea
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+*.swp
+*.swo
+
+# 日志
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# 自动生成(可手动触发)
+# src/api/schema.d.ts  # 注:此文件**入 git**,使 CI 不依赖后端起来

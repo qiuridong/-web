@@ -1,0 +1,4 @@
+# 业务公共组件目录
+#
+# 例:<EmptyState> <PageHeader> <StatusBadge> <ScriptCard> <KpiCard> <FieldRenderer>
+# 设计契约:`进度/设计/前端UI设计.md` § 4。

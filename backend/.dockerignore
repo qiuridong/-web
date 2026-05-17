@@ -1,0 +1,44 @@
+# ===== 不进 docker 镜像的文件 =====
+
+# 本地开发 env(容器用 docker-compose 注入)
+.env
+.env.local
+.env.*.local
+
+# Python 缓存
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.coverage
+htmlcov
+.mypy_cache
+.ruff_cache
+
+# 虚拟环境(容器自己有 /deps)
+.venv
+venv
+env
+
+# 运行时数据(挂载 volume)
+data
+logs
+
+# 临时探测脚本(本地集成 review 用)
+_verify_*.py
+_probe_*.py
+_tmp_*.py
+
+# IDE
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Git
+.git
+.gitignore
+
+# uv lock 本身入镜像(builder 用),但 cache 不进
+.uv-cache

@@ -1,0 +1,4 @@
+# 额外样式片段目录
+#
+# 例:prose.css(react-markdown 内容样式)、xterm-theme.css(终端配色)
+# 主样式与 @theme 在 src/app/index.css。

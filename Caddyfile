@@ -1,0 +1,75 @@
+# =========================================
+# 签到脚本聚合管理面板 · Caddyfile
+# =========================================
+# Caddy 2 自动 HTTPS + 反向代理 + 前端 SPA serve
+# 部署只需把 DOMAIN 与 ACME_EMAIL 配在 .env
+# =========================================
+
+# 全局选项
+{
+    email {$ACME_EMAIL}
+    # 自动 HTTPS:生产环境 Caddy 会向 Let's Encrypt 申请证书
+    # 开发本机用 localhost 时,Caddy 会签发自签名证书(需浏览器手动信任)
+}
+
+# ===== 主站点 =====
+{$DOMAIN} {
+    # 压缩
+    encode zstd gzip
+
+    # 安全 header
+    header {
+        # XSS / Clickjacking 防御
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "geolocation=(), camera=(), microphone=()"
+        # 生产应开 HSTS(本机调试时若用自签名 SSL,启用 HSTS 后会被浏览器记忆,谨慎)
+        # Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        # 移除暴露后端版本的 header
+        -Server
+    }
+
+    # ===== API 反代 =====
+    handle /api/* {
+        reverse_proxy backend:8000 {
+            # SSE / 长连接 友好
+            flush_interval -1
+            transport http {
+                read_timeout 24h
+                write_timeout 24h
+                # 不主动断开空闲长连接(SSE 用)
+                dial_timeout 10s
+            }
+        }
+    }
+
+    # ===== OpenAPI / 健康检查直通 =====
+    handle /openapi.json {
+        reverse_proxy backend:8000
+    }
+    handle /health {
+        reverse_proxy backend:8000
+    }
+    handle /docs* {
+        reverse_proxy backend:8000
+    }
+
+    # ===== 前端 SPA(其它路径全 fallback 到 index.html)=====
+    handle {
+        root * /srv
+        # 静态资源带 hash,可长期缓存
+        @assets path /assets/*
+        header @assets Cache-Control "public, max-age=31536000, immutable"
+
+        try_files {path} /index.html
+        file_server
+    }
+
+    # 访问日志(可选,写到 stdout 让 docker logs 看)
+    log {
+        output stdout
+        format console
+        level INFO
+    }
+}

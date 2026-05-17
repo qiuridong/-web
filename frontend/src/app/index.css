@@ -1,0 +1,341 @@
+/* =========================================================================
+ * 签到管家 · 全局样式入口
+ * 严格按设计稿 `进度/设计/前端UI设计.md` § 1.5 落地。
+ * 任何配色 / 字号 / 圆角 / 阴影 / 动画 token 改动,必须先改设计稿再来同步本文件。
+ * ========================================================================= */
+
+@import 'tailwindcss';
+
+/* tw-animate-css 提供 shadcn 默认 animation utility(fade-in / accordion-up 等) */
+@import 'tw-animate-css';
+
+/* 强制启用 .dark class 模式(默认 @media,我们要 next-themes 手动切) */
+@custom-variant dark (&:is(.dark *));
+
+/* ============ CSS variables(放最前) ============ */
+
+:root {
+  /* ===== 基础语义色(shadcn 标准 12 token) ===== */
+  --background: oklch(1 0 0);                       /* 纯白底 */
+  --foreground: oklch(0.18 0.018 252);              /* 主文字,微蓝中性 */
+
+  --card: oklch(1 0 0);                             /* 卡片底,= background */
+  --card-foreground: oklch(0.18 0.018 252);
+
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.18 0.018 252);
+
+  /* ===== 主色 Brand:Indigo 系,基准 oklch(0.58 0.18 268) ≈ #5865F2 ===== */
+  --primary: oklch(0.58 0.18 268);                  /* 主按钮、链接、focus ring */
+  --primary-foreground: oklch(0.98 0.003 268);
+
+  /* ===== 次要 ===== */
+  --secondary: oklch(0.965 0.005 252);              /* 次按钮底 / hover 浅底 */
+  --secondary-foreground: oklch(0.20 0.018 252);
+
+  --muted: oklch(0.965 0.005 252);                  /* 次背景 */
+  --muted-foreground: oklch(0.48 0.012 252);        /* 次文字 */
+
+  --accent: oklch(0.965 0.005 252);                 /* 选中底 */
+  --accent-foreground: oklch(0.20 0.018 252);
+
+  /* ===== 强调色 Teal,用于次要 CTA、统计图差异色 ===== */
+  --accent-2: oklch(0.69 0.13 188);                 /* ≈ #14B8A6 Teal-500 */
+  --accent-2-foreground: oklch(0.98 0.003 188);
+
+  /* ===== 语义色(全部用 OKLCH,统一彩度) ===== */
+  --success: oklch(0.69 0.16 152);                  /* Emerald-500 ≈ #10B981 */
+  --success-foreground: oklch(0.98 0.005 152);
+  --warning: oklch(0.78 0.16 75);                   /* Amber-500 ≈ #F59E0B */
+  --warning-foreground: oklch(0.18 0.04 75);
+  --danger: oklch(0.65 0.20 17);                    /* Rose-500 ≈ #F43F5E */
+  --danger-foreground: oklch(0.98 0.005 17);
+  --info: oklch(0.69 0.15 230);                     /* Sky-500 ≈ #0EA5E9 */
+  --info-foreground: oklch(0.98 0.005 230);
+
+  /* shadcn 'destructive' 别名 = danger,保持向下兼容 */
+  --destructive: var(--danger);
+  --destructive-foreground: var(--danger-foreground);
+
+  /* ===== 边框 / 输入框 / focus ring ===== */
+  --border: oklch(0.92 0.005 252);                  /* 极淡边框 */
+  --input: oklch(0.92 0.005 252);
+  --ring: oklch(0.58 0.18 268 / 0.5);               /* 主色半透明 ring */
+
+  /* ===== Recharts / 数据可视化 5 色调色板 ===== */
+  --chart-1: oklch(0.58 0.18 268);                  /* indigo,= primary */
+  --chart-2: oklch(0.69 0.13 188);                  /* teal */
+  --chart-3: oklch(0.78 0.16 75);                   /* amber */
+  --chart-4: oklch(0.69 0.16 152);                  /* emerald */
+  --chart-5: oklch(0.65 0.20 17);                   /* rose */
+
+  /* ===== Sidebar(shadcn sidebar block 专用) ===== */
+  --sidebar: oklch(0.985 0.003 252);                /* 比 background 稍灰 */
+  --sidebar-foreground: oklch(0.20 0.018 252);
+  --sidebar-primary: oklch(0.58 0.18 268);
+  --sidebar-primary-foreground: oklch(0.98 0.003 268);
+  --sidebar-accent: oklch(0.94 0.008 252);
+  --sidebar-accent-foreground: oklch(0.20 0.018 252);
+  --sidebar-border: oklch(0.92 0.005 252);
+  --sidebar-ring: oklch(0.58 0.18 268 / 0.5);
+
+  /* ===== 圆角(shadcn 标准) ===== */
+  --radius: 0.625rem;                               /* 10px,作为 base */
+
+  /* ===== 阴影 ===== */
+  --shadow-xs: 0 1px 2px 0 oklch(0 0 0 / 0.04);
+  --shadow-sm: 0 1px 3px 0 oklch(0 0 0 / 0.05), 0 1px 2px -1px oklch(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px oklch(0 0 0 / 0.06), 0 2px 4px -2px oklch(0 0 0 / 0.06);
+  --shadow-lg: 0 10px 15px -3px oklch(0 0 0 / 0.06), 0 4px 6px -4px oklch(0 0 0 / 0.04);
+  --shadow-xl: 0 20px 25px -5px oklch(0 0 0 / 0.08), 0 8px 10px -6px oklch(0 0 0 / 0.05);
+
+  /* ===== 动画 timing token ===== */
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+  --duration-slow: 280ms;
+}
+
+.dark {
+  /* ===== 基础:near-black 而非纯黑;偏蓝中性 ===== */
+  --background: oklch(0.16 0.012 252);              /* #0D1117 类灰蓝黑 */
+  --foreground: oklch(0.95 0.005 252);              /* near-white,微暖 */
+
+  --card: oklch(0.20 0.012 252);                    /* 比 background 高一档,有"浮起"感 */
+  --card-foreground: oklch(0.95 0.005 252);
+
+  --popover: oklch(0.22 0.012 252);
+  --popover-foreground: oklch(0.95 0.005 252);
+
+  /* 主色亮度抬升 + 彩度略降,避免过艳;白文 contrast 通过 */
+  --primary: oklch(0.69 0.16 268);                  /* 比浅色亮一档,看着更"亮但不刺" */
+  --primary-foreground: oklch(0.16 0.012 268);
+
+  --secondary: oklch(0.26 0.010 252);
+  --secondary-foreground: oklch(0.95 0.005 252);
+
+  --muted: oklch(0.24 0.010 252);
+  --muted-foreground: oklch(0.68 0.012 252);
+
+  --accent: oklch(0.28 0.012 252);
+  --accent-foreground: oklch(0.95 0.005 252);
+
+  --accent-2: oklch(0.74 0.12 188);
+  --accent-2-foreground: oklch(0.16 0.04 188);
+
+  /* 语义色:深色下亮度普遍 +0.05,彩度 -0.02 */
+  --success: oklch(0.74 0.14 152);
+  --success-foreground: oklch(0.18 0.04 152);
+  --warning: oklch(0.82 0.14 75);
+  --warning-foreground: oklch(0.18 0.04 75);
+  --danger: oklch(0.70 0.18 17);
+  --danger-foreground: oklch(0.98 0.005 17);
+  --info: oklch(0.74 0.13 230);
+  --info-foreground: oklch(0.18 0.04 230);
+  --destructive: var(--danger);
+  --destructive-foreground: var(--danger-foreground);
+
+  --border: oklch(1 0 0 / 0.10);                    /* 半透明白边,深色下显得"漂浮" */
+  --input: oklch(1 0 0 / 0.10);
+  --ring: oklch(0.69 0.16 268 / 0.55);
+
+  /* 图表深色调整:增加饱和让在暗底辨识更高 */
+  --chart-1: oklch(0.69 0.16 268);
+  --chart-2: oklch(0.74 0.12 188);
+  --chart-3: oklch(0.82 0.14 75);
+  --chart-4: oklch(0.74 0.14 152);
+  --chart-5: oklch(0.70 0.18 17);
+
+  /* Sidebar 深色:比 background 再深一档,与右侧主区做层次 */
+  --sidebar: oklch(0.14 0.012 252);
+  --sidebar-foreground: oklch(0.92 0.005 252);
+  --sidebar-primary: oklch(0.69 0.16 268);
+  --sidebar-primary-foreground: oklch(0.16 0.012 252);
+  --sidebar-accent: oklch(0.22 0.012 252);
+  --sidebar-accent-foreground: oklch(0.95 0.005 252);
+  --sidebar-border: oklch(1 0 0 / 0.08);
+  --sidebar-ring: oklch(0.69 0.16 268 / 0.55);
+
+  /* 深色阴影:用更大模糊 + 内嵌高光线模拟"边缘抓光" */
+  --shadow-xs: 0 1px 2px 0 oklch(0 0 0 / 0.30), inset 0 1px 0 0 oklch(1 0 0 / 0.04);
+  --shadow-sm: 0 1px 3px 0 oklch(0 0 0 / 0.35), 0 1px 2px -1px oklch(0 0 0 / 0.30), inset 0 1px 0 0 oklch(1 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px oklch(0 0 0 / 0.40), 0 2px 4px -2px oklch(0 0 0 / 0.35), inset 0 1px 0 0 oklch(1 0 0 / 0.06);
+  --shadow-lg: 0 10px 15px -3px oklch(0 0 0 / 0.45), 0 4px 6px -4px oklch(0 0 0 / 0.35), inset 0 1px 0 0 oklch(1 0 0 / 0.06);
+  --shadow-xl: 0 20px 25px -5px oklch(0 0 0 / 0.50), 0 8px 10px -6px oklch(0 0 0 / 0.40), inset 0 1px 0 0 oklch(1 0 0 / 0.08);
+}
+
+/* ============ Tailwind v4 @theme:把 CSS vars 暴露成 utility ============ */
+@theme inline {
+  /* color tokens */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent-2: var(--accent-2);
+  --color-accent-2-foreground: var(--accent-2-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-danger: var(--danger);
+  --color-danger-foreground: var(--danger-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* radius scale,基于 --radius 自动衍生(shadcn 约定) */
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+
+  /* font families */
+  --font-sans: 'Inter Variable', -apple-system, BlinkMacSystemFont,
+               'PingFang SC', 'HarmonyOS Sans SC', 'Microsoft YaHei',
+               'Helvetica Neue', Arial, 'Noto Sans CJK SC', sans-serif,
+               'Apple Color Emoji', 'Segoe UI Emoji';
+  --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', 'Fira Code',
+               'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
+
+  /* 自定义关键帧:呼吸点 + mesh 漂移 + skeleton shimmer */
+  --animate-pulse-dot: pulseDot 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-mesh-drift: meshDrift 40s ease-in-out infinite alternate;
+  --animate-shimmer: shimmer 1.6s linear infinite;
+
+  @keyframes pulseDot {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50%      { transform: scale(1.4); opacity: 0.55; }
+  }
+  @keyframes meshDrift {
+    0%   { transform: translate3d(-3%, -2%, 0) scale(1.02); }
+    50%  { transform: translate3d(3%, 1%, 0) scale(1.06); }
+    100% { transform: translate3d(-2%, 3%, 0) scale(1.02); }
+  }
+  @keyframes shimmer {
+    0%   { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+}
+
+/* ============ 基础 layer ============ */
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    @apply antialiased;
+    text-rendering: optimizeLegibility;
+    /* 滚动条不抢空间 */
+    scrollbar-gutter: stable;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+    font-feature-settings: 'cv11', 'ss01', 'ss03', 'salt';
+    font-optical-sizing: auto;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* 焦点环统一 */
+  *:focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+
+  /* 内置滚动条美化(macOS 风) */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-border rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/30;
+  }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  /* 全局选中色 */
+  ::selection {
+    background-color: oklch(0.58 0.18 268 / 0.25);
+  }
+
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* ============ utility 层:小工具 ============ */
+@layer utilities {
+  /* 卡片 hover 浮起 */
+  .card-hover {
+    @apply transition-all duration-200 ease-[cubic-bezier(0.25,1,0.5,1)]
+           hover:-translate-y-0.5 hover:shadow-md;
+  }
+
+  /* 按钮按压感 */
+  .btn-press {
+    @apply transition-transform active:scale-[0.98];
+  }
+
+  /* 玻璃拟态卡(登录页) */
+  .glass {
+    background-color: oklch(1 0 0 / 0.7);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+  }
+  .dark .glass {
+    background-color: oklch(0.20 0.012 252 / 0.6);
+  }
+
+  /* 状态点呼吸光晕(配合 .relative + 父级 isolate) */
+  .dot-pulse::before {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    border-radius: 9999px;
+    background: currentColor;
+    opacity: 0.45;
+    animation: var(--animate-pulse-dot);
+    z-index: -1;
+  }
+
+  /* skeleton shimmer */
+  .skeleton-shimmer {
+    background: linear-gradient(
+      90deg,
+      var(--muted) 0%,
+      color-mix(in oklch, var(--muted) 80%, var(--foreground) 20%) 50%,
+      var(--muted) 100%
+    );
+    background-size: 200% 100%;
+    animation: var(--animate-shimmer);
+  }
+}

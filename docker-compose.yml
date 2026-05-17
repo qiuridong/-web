@@ -1,0 +1,48 @@
+# =========================================
+# 签到脚本聚合管理面板 · 生产 docker-compose
+# =========================================
+# 部署模式:**复用 host nginx + certbot**(因服务器 nginx 已在服务其它站点)
+# Caddy 容器已去掉;backend 只绑 host loopback,nginx 反代它。
+#
+# 操作:
+#   docker compose up -d --build      # 起 / 重建
+#   docker compose down               # 停
+#   docker compose logs -f backend    # 看日志
+#   docker compose exec backend bash  # 进容器调试
+# =========================================
+
+services:
+  # ===== 后端:FastAPI + APScheduler =====
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: signin-panel-backend:latest
+    container_name: signin-panel-backend
+    restart: unless-stopped
+    user: "${UID:-1000}:${GID:-1000}"        # 与 host 文件属主对齐(host 文件 chown 1000)
+    init: true                               # tini 当 PID1,优雅处理 SIGTERM
+    # 只绑 host loopback,host nginx 反代到这里;外部直接访问 :8000 应失败
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - DATABASE_URL=${DATABASE_URL:-sqlite:////app/data/db.sqlite3}
+      - SCHEDULER_DB_URL=${SCHEDULER_DB_URL:-sqlite:////app/data/scheduler.db}
+      - ENCRYPTION_KEY_PATH=${ENCRYPTION_KEY_PATH:-/app/data/encryption.key}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - PORT=${PORT:-8000}
+      - WORKERS=${WORKERS:-1}                # 必须 1,APScheduler 同进程
+      - SCRIPTS_DIR=${SCRIPTS_DIR:-/app/scripts}
+    volumes:
+      - ./data:/app/data                     # SQLite + Fernet key
+      - ./scripts:/app/scripts               # 签到脚本源码(host 主存)
+      - ./logs:/app/logs                     # 应用日志
+    mem_limit: 1g                            # 整容器内存上限
+    pids_limit: 1024                         # 防 fork bomb
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; urllib.request.urlopen('http://localhost:8000/health',timeout=3) or sys.exit(0)\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s

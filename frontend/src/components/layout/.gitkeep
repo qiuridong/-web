@@ -1,0 +1,4 @@
+# 全局布局组件目录
+#
+# 例:<AppSidebar> <TopBar> <CommandPalette> <ThemeToggle> <UserMenu> <PublicLayout> <AppLayout>
+# 设计契约:`进度/设计/前端UI设计.md` § 2.2、§ 3.3、§ 4。

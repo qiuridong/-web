@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN" class="" translate="no">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#5865F2" />
+    <!-- 禁用浏览器/扩展自动翻译。Edge/Chrome Translate 会替换文本节点,
+         破坏 React reconciler 引用,导致 "insertBefore Failed" 运行时崩。
+         界面已是中文,无需再翻译,直接关掉。 -->
+    <meta name="google" content="notranslate" />
+    <meta http-equiv="Content-Language" content="zh-CN" />
+    <meta
+      name="description"
+      content="签到管家:统一管理 7×24 自动签到脚本的 Web 控制台,支持调度、通知、加密配置与实时日志。"
+    />
+    <title>签到管家</title>
+    <!-- 字体 self-hosted via @fontsource-variable,无需 preload Google Fonts -->
+    <!-- 防 FOUC:在 main.tsx 挂载前先按 prefers-color-scheme 给 html 加 .dark -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('theme');
+          var systemDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var dark = stored === 'dark' || ((stored === null || stored === 'system') && systemDark);
+          if (dark) document.documentElement.classList.add('dark');
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body class="bg-background text-foreground notranslate" translate="no">
+    <div id="root" translate="no" class="notranslate"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
