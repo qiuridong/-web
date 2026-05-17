@@ -43,10 +43,29 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     workers: int = Field(default=1, description="必须 1,APScheduler 同进程模式禁止多 worker")
-    expose_docs: bool = Field(
-        default=True,
-        description="生产环境可设 false 关闭 /docs 与 /openapi.json",
+    #: audit High #9:expose_docs 默认值依 environment 推断 ——
+    #: production → False(/openapi.json 与 /docs 返 404,屏蔽攻击面枚举)
+    #: 其他(development/test)→ True
+    #: 仍可被环境变量 ``EXPOSE_DOCS=true`` 显式覆盖(production 临时调试)
+    expose_docs: bool | None = Field(
+        default=None,
+        description=(
+            "是否暴露 /docs 与 /openapi.json。"
+            "默认依 environment 推断 —— production 关闭,其他打开。"
+            "可被环境变量 EXPOSE_DOCS=true|false 显式覆盖。"
+        ),
     )
+
+    def is_docs_exposed(self) -> bool:
+        """安全策略:expose_docs 显式设置时听它的,否则按 environment 推断。
+
+        audit High #9:历史默认 ``expose_docs=True``,生产 ``/openapi.json``
+        无鉴权暴露全部 36 端点 schema。修复为"按 environment 推断"——
+        production 默认关闭,显式可覆盖。
+        """
+        if self.expose_docs is not None:
+            return bool(self.expose_docs)
+        return not self.is_production
 
     # ===== 数据库 =====
     database_url: str = Field(

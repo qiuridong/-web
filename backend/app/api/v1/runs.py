@@ -123,10 +123,21 @@ def list_runs(
         datetime | None,
         Query(description="started_at < 此时间(ISO 8601)"),
     ] = None,
+    order: Annotated[
+        str,
+        Query(
+            description=(
+                "按 started_at 排序方向 — 'desc'(默认 / 最新优先)或 'asc'。"
+                "audit High #13:之前前端传 order 后端静默忽略,现已正确生效。"
+            ),
+            pattern="^(asc|desc)$",
+        ),
+    ] = "desc",
 ) -> RunListResponse:
     """🔒 返回 ``{ items, total, page, page_size }``。
 
-    按 ``started_at DESC`` 排序;列表项不含 stdout/stderr。
+    默认按 ``started_at DESC`` 排序;传 ``order=asc`` 可切换升序。
+    列表项不含 stdout/stderr。
     """
     page, page_size = pagination
     items, total = run_service.list_runs(
@@ -137,6 +148,7 @@ def list_runs(
         trigger_type=trigger_type,
         started_after=started_after,
         started_before=started_before,
+        order=order,
         page=page,
         page_size=page_size,
     )

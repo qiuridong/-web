@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-label="PTFans 每日签到">
+  <!-- 种子下载图标 + PT 标识:磁盘 + 向下箭头 + 横线 -->
+  <circle cx="12" cy="12" r="10" />
+  <path d="M12 7v6" />
+  <path d="M9 10l3 3 3-3" />
+  <path d="M8 17h8" />
+</svg>

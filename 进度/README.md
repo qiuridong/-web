@@ -15,7 +15,7 @@ type: index
 
 - **名称**:签到脚本聚合管理面板(暂定中文名"签到管家")
 - **目标**:把零散的 Python 签到脚本统一到一个 Web 控制台,服务器 7×24 调度 + 浏览器一站式管理 + 通知推送
-- **仓库**:本地未推送(`E:\签到脚本多合一`,尚未 `git init`)
+- **仓库**:**https://github.com/qiuridong/-web**(2026-05-17 首次 push,237 文件,commit `704b47f`)
 - **默认分支**:`main`(待 init)
 - **提交规范**:Conventional Commits(`feat: ` / `fix: ` / `chore: ` 等)
 - **推送命令**:本仓库未配置 remote
@@ -49,7 +49,13 @@ docker compose logs -f backend      # 看日志
 
 ## 当前状态
 
-**2026-05-17 用户咨询答疑会话(纯只读)** — MVP-4 已在 2026-05-16 后段部署到生产并 137 后端断言全过 + coklw 真签到走通(详见 todo 1)。本次会话回答 5 个问题:与青龙对比 / 添加脚本流程(scp + 扫描)/ 脚本开发标准(manifest 11 字段 + `__RUN_RESULT__` 协议,范例 `scripts/coklw/`)/ Obsidian 集成(`进度/` 当 vault)/ **git 状态澄清**——核实后**项目从未 git init**(E 盘根无 .git,D:\dd\deom\签到聚合 仅含"初衷.md"占位),用户原以为"似乎同步到 git"是误会。**P0 风险待用户决定**:git init + 推 GitHub/Gitee(否则硬盘挂 = 全没)。
+**2026-05-17 · git init + 推 GitHub 完成 ✅** — 用户创建 `qiuridong/-web` 仓库后,PM 执行 `git init` + first commit(237 文件,hash `704b47f`)+ `git push -u origin main` 成功。新增 `项目说明.md`(~480 行,面向真人的中文说明)+ `.gitignore` 安全加固(补 `/backend/data/` 拦 encryption.key)+ Obsidian 笔记 `D:\dd\deom\签到聚合\项目-签到管家.md`。详见 [`变更/2026-05-17-git-init-与项目说明文档.md`](变更/2026-05-17-git-init-与项目说明文档.md)。
+
+**2026-05-17 PM · 用户授权后续 3 件事**:(1)修 audit High 剩 7 项(opus agent 后台跑中,本机改 + verify,不部署)/ (2)用户名 admin 保持不变,密码用户已自改强密码 ✅ / (3)Web 脚本管理 MVP-5(**用户澄清后重新定义**:主功能 = **上传现成脚本目录/zip 到 scripts/ 自动入库**,次要 = 在线小修单文件;**不是** Monaco 全套 IDE)。设计稿已重写 [设计/Web脚本编辑器.md](设计/Web脚本编辑器.md),用 react-dropzone 上传 + CodeMirror 轻编辑器(总 bundle 增量 ~200KB),实施约 50 分钟(并行)。用户并行去抓包第二个签到脚本(候选 B 站 / V2EX 等)。
+
+**2026-05-17 晚 · 🎉 多合一里程碑 N=2 + audit High 部署上线** — (1)PTFans 第二个真签到脚本完成并入库,opus agent 分析 3.1MB HAR 写 5 文件 + dry-run 3/3 过(NexusPHP 纯 GET `/attendance.php`,唯一 cookie `c_secure_pass` 1+ 年有效,无 turnstile)/ (2)audit High 7 项加固一并部署(节省一次 docker rebuild)/ (3)生产 smoke test 全绿:`/health` 200 / `/openapi.json` **404**(#9 生效)/ order 参数 401(#13 通过校验被 auth 拦)/ (4)修了我自己写错的协议文档 `项目说明.md § 3.3`:脚本协议是 `run(config, context) -> RunResult` 函数模型,**不是**裸 stdin/stdout(已纠正)。详见 [变更/2026-05-17-PTFans脚本+audit部署.md](变更/2026-05-17-PTFans脚本+audit部署.md)。**用户下一步**:浏览器 /scripts 重新扫描 → 看到 PTFans → 建实例 → 填 c_secure_pass cookie。
+
+**MVP-4 已上线** — 在 2026-05-16 后段部署到生产,137 后端断言全过 + coklw 真签到走通。
 
 **⏸ 2026-05-16 · 今日暂停**(用户休息,明天继续)。完整接手单文件:[`变更/2026-05-16-今日暂停-MVP3-Hotfix-MVP4进行中.md`](变更/2026-05-16-今日暂停-MVP3-Hotfix-MVP4进行中.md)。
 
@@ -148,6 +154,9 @@ docker compose logs -f backend      # 看日志
 
 | 日期 | 标题 | 文件 |
 |---|---|---|
+| 2026-05-17 | 🎉 **PTFans 真签到脚本上线**(多合一 N=2,NexusPHP)+ **audit High 7 项加固一并部署**,生产 smoke 全绿 | [变更/2026-05-17-PTFans脚本+audit部署.md](变更/2026-05-17-PTFans脚本+audit部署.md) |
+| 2026-05-17 | audit High 7 项加固本机完成 + 178 断言全过(已部署见上条) | [变更/2026-05-17-audit-High-7项加固.md](变更/2026-05-17-audit-High-7项加固.md) |
+| 2026-05-17 | 🎉 **git init + 推 GitHub 完成**(`qiuridong/-web`,237 文件)+ 项目说明.md + .gitignore 安全加固 + Obsidian 笔记 | [变更/2026-05-17-git-init-与项目说明文档.md](变更/2026-05-17-git-init-与项目说明文档.md) |
 | 2026-05-16 | **MVP-3A · dashboard 4 字段补齐 + executor→dispatcher 通知闭环**(本机 25 新增断言全过,合计 103) | [变更/2026-05-16-MVP-3A通知闭环.md](变更/2026-05-16-MVP-3A通知闭环.md) |
 | 2026-05-16 | 🎉🎉 **MVP-2 生产上线**(实例 CRUD + 调度 + sandbox + SSE + 通知 + 完整 UI · 135 断言全过 + 生产端到端 verified)| [变更/2026-05-16-MVP-2上线.md](变更/2026-05-16-MVP-2上线.md) |
 | 2026-05-16 | 🎉 **MVP-1 生产上线** https://jb.aijiaxia.cc(11/11 自测全绿) | [变更/2026-05-16-MVP-1上线.md](变更/2026-05-16-MVP-1上线.md) |
@@ -177,13 +186,13 @@ docker compose logs -f backend      # 看日志
 | [设计/前端UI设计.md](设计/前端UI设计.md) | **React + shadcn/ui** 版:视觉风格 / 配色(OKLCH CSS vars)/ 字体 / 页面 wireframe / 组件清单 / 美化关键手法 / Tailwind v4 配置 |
 | [设计/前端UI设计-旧Vue版.md](设计/前端UI设计-旧Vue版.md) | (历史)Vue + Element Plus 版,设计语言相同,仅技术栈不同 |
 | [设计/技术调研.md](设计/技术调研.md) | APScheduler/子进程/apprise/Vue 脚手架/SSE/Docker/加密 七大主题最佳实践 |
+| [设计/Web脚本编辑器.md](设计/Web脚本编辑器.md) | **MVP-5 主功能** · Monaco 在线编辑器写 manifest + main.py + sandbox dry-run 校验(2026-05-17 设计完成,待开工) |
 
 ## 未决项 / Blockers
 
 | 项 | 备注 |
 |---|---|
-| 是否需要 git init + 推 GitHub? | 用户未明示,目前本地工作。等 MVP-1 完成后再问 |
-| 第一个 demo 签到脚本选什么? | 暂定 `bilibili-daily`(覆盖 secret/integer/multiselect 字段类型) |
+| 第一个 demo 签到脚本选什么? | ✅ 已完成 `coklw`(生产真签到走通);下一个候选 bilibili-daily 验证标准通用性 |
 | 域名与 HTTPS 配置 | 待用户提供生产域名;开发阶段用 localhost |
 
 ## 交接备忘(给下一个 AI / 协作者)

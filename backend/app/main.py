@@ -134,14 +134,17 @@ def create_app() -> FastAPI:
     """FastAPI app 工厂。"""
     settings = get_settings()
 
+    # audit High #9:用 is_docs_exposed() 而非裸 expose_docs;default 时按 environment
+    # 推断(production → False)
+    docs_on = settings.is_docs_exposed()
     app = FastAPI(
         title="签到管家 API",
         description="签到脚本聚合管理面板 — 后端 API",
         version=_APP_VERSION,
         lifespan=lifespan,
-        docs_url="/docs" if settings.expose_docs else None,
+        docs_url="/docs" if docs_on else None,
         redoc_url=None,
-        openapi_url="/openapi.json" if settings.expose_docs else None,
+        openapi_url="/openapi.json" if docs_on else None,
     )
 
     # ===== 中间件 =====

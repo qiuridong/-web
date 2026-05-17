@@ -240,18 +240,28 @@ def _sqlite_online_backup(src_path: Path, dst_path: Path) -> None:
 @router.post(
     "/backup/import",
     response_model=BackupImportResponse,
-    status_code=status.HTTP_200_OK,
-    summary="导入 zip 备份(v1 简化:仅解析 meta,真替换需外部重启)",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="导入 zip 备份(v1:仅校验 + 落临时 staging,实际替换需外部重启)",
 )
 async def backup_import(
     _user: CurrentUser,
     file: Annotated[UploadFile, File(description="备份 zip 文件")],
 ) -> BackupImportResponse:
-    """🔒 接受 multipart upload 的 zip,解析其中 ``meta.json``。
+    """🔒 接受 multipart upload 的 zip,解析 ``meta.json`` + 落到 staging 目录。
 
-    v1 暂不自动替换 + 重启;只校验 zip 结构 + 返回 meta + TODO 提示。
-    真正的还原:需要运维人员手动 stop 服务、替换 ``data/db.sqlite3``
-    与可选 ``data/encryption.key``,然后 ``docker compose restart``。
+    audit High #15 修复重点:
+    ----------------------
+    历史问题:旧实现返 ``200 OK`` 但只解析 meta,用户以为已恢复。
+    现在:
+    1. 状态码改 ``202 Accepted`` ——明确"已接收待处理",非"已完成"
+    2. ``message`` 文案前缀加 ``[需要手动重启完成恢复]`` 醒目提示
+    3. 把 zip 内的 ``db.sqlite3`` / ``encryption.key`` 落到
+       ``app_data_dir/backups/staging-{timestamp}/`` 而不是仅"丢弃"——
+       让运维人员可直接 ``mv staging/db.sqlite3 data/db.sqlite3`` 后 restart
+    4. 响应增加 ``staging_dir`` 字段告诉用户文件落到哪里
+
+    v1 仍不自动执行 ``os.execv`` 重启 —— 那是高风险操作,
+    生产数据无法回滚,留给运维手工确认。设计稿 § 9.3 已说明 v1 trade-off。
     """
     raw = await file.read()
     if not raw:
@@ -271,6 +281,12 @@ async def backup_import(
                     details={"namelist": sorted(names)},
                 )
             meta_raw = zf.read("meta.json").decode("utf-8")
+            db_bytes = zf.read("db.sqlite3")
+            key_bytes = (
+                zf.read("encryption.key")
+                if "encryption.key" in names
+                else None
+            )
     except ValidationError:
         raise
     except Exception as exc:  # noqa: BLE001
@@ -288,19 +304,40 @@ async def backup_import(
             details={"filename": file.filename},
         ) from exc
 
+    # audit High #15:落 staging,让用户可直接 mv 替换;不再"假成功"
+    settings = get_settings()
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    staging_dir = settings.app_data_dir / "backups" / f"staging-{ts}"
+    try:
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        (staging_dir / "db.sqlite3").write_bytes(db_bytes)
+        (staging_dir / "meta.json").write_text(meta_raw, encoding="utf-8")
+        if key_bytes is not None and parsed.includes_key:
+            (staging_dir / "encryption.key").write_bytes(key_bytes)
+    except OSError as exc:
+        logger.exception("写入备份 staging 失败 err={}", exc)
+        raise ValidationError(
+            f"备份 staging 写入失败: {exc}",
+            details={"staging_dir": str(staging_dir)},
+        ) from exc
+
     logger.info(
-        "收到备份导入 meta version={} exported_at={} includes_key={}",
+        "收到备份导入(202 Accepted)meta version={} exported_at={} includes_key={} staging={}",
         parsed.version,
         parsed.exported_at,
         parsed.includes_key,
+        staging_dir,
     )
     return BackupImportResponse(
         parsed=parsed,
         message=(
-            "v1 暂不自动替换数据库与密钥。"
-            "请运维手动停服 → 替换 data/db.sqlite3 与可选 data/encryption.key → "
-            "执行 docker compose restart。"
+            "[需要手动重启完成恢复] "
+            "v1 不会自动替换 DB / encryption.key,以防生产数据无法回滚。"
+            f"文件已落到 {staging_dir.as_posix()};"
+            "请运维:1) 停服;2) 把 staging 中的 db.sqlite3"
+            "(和可选 encryption.key)mv 到 data/ 覆盖;3) docker compose restart。"
         ),
+        staging_dir=str(staging_dir),
     )
 
 

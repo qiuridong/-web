@@ -73,11 +73,24 @@ class BackupExportMeta(BaseModel):
 class BackupImportResponse(BaseModel):
     """``POST /settings/backup/import`` 响应。
 
-    v1 简化:只解析 meta,真正替换 + 重启需要外部操作。
+    audit High #15:
+    - HTTP 状态码改为 ``202 Accepted``(原 200 OK,用户以为已成功恢复)
+    - ``message`` 文案以 ``[需要手动重启完成恢复]`` 开头,强调"未完成"
+    - 新增 ``staging_dir`` 字段:文件落到磁盘的目录,运维直接 mv 即可
     """
 
     parsed: BackupExportMeta
     message: str = Field(
         ...,
-        description="提示文字,例如:`v1 暂不自动替换,请运行 docker compose restart`",
+        description=(
+            "状态提示;v1 阶段以 [需要手动重启完成恢复] 开头,提示用户"
+            "查看 staging_dir 中文件,完成 mv + restart"
+        ),
+    )
+    staging_dir: str | None = Field(
+        default=None,
+        description=(
+            "audit High #15:zip 解包后落到的 staging 目录绝对路径。"
+            "运维需要把其中的 db.sqlite3 / encryption.key mv 到 data/ 并重启。"
+        ),
     )

@@ -107,12 +107,15 @@ Pagination = Annotated[tuple[int, int], Depends(get_pagination)]
 def get_scheduler(request: Request) -> "SchedulerService":
     """从 ``app.state.scheduler`` 取调度器实例。
 
-    若未启动(测试 / 关停期)抛 RuntimeError;路由层应捕获或交给全局
-    error_handler。
+    audit High #12:之前抛裸 ``RuntimeError``,被全局 error_handler 兜到 500
+    + ERROR 级日志,污染告警。改抛 ``SchedulerNotReady`` (503 + INFO),语义
+    更准确(临时不可用,客户端可重试)。
     """
+    from app.core.exceptions import SchedulerNotReady  # noqa: PLC0415
+
     scheduler = getattr(request.app.state, "scheduler", None)
     if scheduler is None:
-        raise RuntimeError("Scheduler 尚未初始化")
+        raise SchedulerNotReady("Scheduler 尚未初始化")
     return scheduler
 
 

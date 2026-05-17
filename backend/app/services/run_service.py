@@ -61,12 +61,18 @@ def list_runs(
     trigger_type: str | None = None,
     started_after: datetime | None = None,
     started_before: datetime | None = None,
+    order: str = "desc",
     page: int = 1,
     page_size: int = 20,
 ) -> tuple[list[Run], int]:
     """分页列表 + 多维筛选。
 
-    所有筛选条件 AND 组合;按 ``started_at DESC`` 排序。
+    :param order: 'desc'(默认) / 'asc' — 按 ``started_at`` 方向。
+                   audit High #13:之前 API 接收 order 参数但 service 端忽略,
+                   排序需求被静默丢弃。现在按入参生效。
+                   任何非 'asc' 值都按 'desc' 处理(防御性兜底)。
+
+    所有筛选条件 AND 组合;默认按 ``started_at DESC, id DESC`` 排序。
     返回 ``(items, total)``;调用方负责裁剪 stdout/stderr。
     """
     conds: list[Any] = []
@@ -94,12 +100,15 @@ def list_runs(
 
     total = int(db.execute(count_stmt).scalar_one())
 
+    # audit High #13:接受 order 参数,'asc' → ASC,其他 → DESC(默认行为)
+    order_norm = (order or "desc").lower()
+    if order_norm == "asc":
+        order_by = (Run.started_at.asc(), Run.id.asc())
+    else:
+        order_by = (Run.started_at.desc(), Run.id.desc())
+
     offset = max(0, (page - 1) * page_size)
-    list_stmt = (
-        list_stmt.order_by(Run.started_at.desc(), Run.id.desc())
-        .offset(offset)
-        .limit(page_size)
-    )
+    list_stmt = list_stmt.order_by(*order_by).offset(offset).limit(page_size)
     items = list(db.scalars(list_stmt).all())
     return items, total
 

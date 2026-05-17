@@ -54,9 +54,13 @@ def list_scripts(
         Query(description="模糊匹配 slug / name", max_length=64),
     ] = None,
 ) -> ScriptListResponse:
-    """🔒 返回 ``{ items, total, page, page_size }``。"""
+    """🔒 返回 ``{ items, total, page, page_size }``。
+
+    audit High #7:用 ``list_scripts_with_counts`` 一次 SQL outerjoin + group by
+    拉出 ``(Script, instance_count)`` 对,消除原 N+1(每条 COUNT)。
+    """
     page, page_size = pagination
-    items, total = script_service.list_scripts(
+    items, total = script_service.list_scripts_with_counts(
         db,
         enabled=enabled,
         q=q,
@@ -64,24 +68,21 @@ def list_scripts(
         page_size=page_size,
     )
 
-    # 给每个 item 计算 instance_count(简单实现:N+1;v1 数据量小可接受)
-    # 后续可改为 outerjoin + group by 一次性算出
-    list_items: list[ScriptListItem] = []
-    for s in items:
-        list_items.append(
-            ScriptListItem(
-                id=s.id,
-                slug=s.slug,
-                name=s.name,
-                description=s.description,
-                version=s.version,
-                default_cron=s.default_cron,
-                enabled=s.enabled,
-                requires_secret=s.requires_secret,
-                instance_count=script_service._count_instances_for(db, s.id),
-                last_scanned_at=s.last_scanned_at,
-            )
+    list_items: list[ScriptListItem] = [
+        ScriptListItem(
+            id=s.id,
+            slug=s.slug,
+            name=s.name,
+            description=s.description,
+            version=s.version,
+            default_cron=s.default_cron,
+            enabled=s.enabled,
+            requires_secret=s.requires_secret,
+            instance_count=instance_count,
+            last_scanned_at=s.last_scanned_at,
         )
+        for s, instance_count in items
+    ]
 
     return ScriptListResponse(
         items=list_items,

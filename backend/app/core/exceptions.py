@@ -184,6 +184,25 @@ class ExternalServiceError(AppException):
 
 
 # ============================================================
+# 503 — 服务暂不可用
+# ============================================================
+class ServiceUnavailable(AppException):
+    """audit High #12:替代裸 ``RuntimeError`` 用于 scheduler 未就绪等场景。
+
+    走 503 + INFO 级日志(原来 RuntimeError 兜到 500 + ERROR 级,污染日志)。
+    """
+
+    code = "SERVICE_UNAVAILABLE"
+    status_code = 503
+    default_message = "服务暂不可用,请稍后重试"
+
+
+class SchedulerNotReady(ServiceUnavailable):
+    code = "SCHEDULER_NOT_READY"
+    default_message = "调度器尚未就绪,请稍后重试"
+
+
+# ============================================================
 # 500 — 兜底内部错误
 # ============================================================
 class InternalError(AppException):

@@ -83,6 +83,57 @@ def list_scripts(
     return items, total
 
 
+def list_scripts_with_counts(
+    db: Session,
+    *,
+    enabled: bool | None = None,
+    q: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list[tuple[Script, int]], int]:
+    """audit High #7:列表 + instance_count 一次 SQL 拉出(消除 N+1)。
+
+    替代旧版"先 list_scripts,再对每条调 _count_instances_for"路径
+    (后者在 page_size=20 时多发 20 次 COUNT SQL)。
+
+    本函数用 ``outerjoin + group_by`` 一次查询拉出 ``(Script, instance_count)``
+    元组列表;count 走 SQL ``COUNT(Instance.id)``,空时为 0。
+
+    :returns: ``([(Script, instance_count), ...], total)``
+    """
+    # 同样的 where 子句,先单独算 total 避免 group by 影响 count
+    where_clauses: list[Any] = []
+    if enabled is not None:
+        where_clauses.append(Script.enabled == enabled)
+    if q:
+        like = f"%{q}%"
+        where_clauses.append(or_(Script.slug.ilike(like), Script.name.ilike(like)))
+
+    count_stmt = select(func.count()).select_from(Script)
+    if where_clauses:
+        for c in where_clauses:
+            count_stmt = count_stmt.where(c)
+    total = int(db.execute(count_stmt).scalar_one())
+
+    # outerjoin Instance + group by Script.id —— SQLite 支持 GROUP BY 单列
+    # 后选 Script 全部列
+    stmt = (
+        select(Script, func.count(Instance.id).label("instance_count"))
+        .outerjoin(Instance, Instance.script_id == Script.id)
+        .group_by(Script.id)
+    )
+    if where_clauses:
+        for c in where_clauses:
+            stmt = stmt.where(c)
+
+    offset = max(0, (page - 1) * page_size)
+    stmt = stmt.order_by(Script.slug.asc()).offset(offset).limit(page_size)
+
+    rows = db.execute(stmt).all()
+    items = [(row[0], int(row[1] or 0)) for row in rows]
+    return items, total
+
+
 def get_script_by_slug(db: Session, slug: str) -> Script:
     """按 slug 取单个;不存在抛 :class:`ScriptNotFound`。"""
     script = db.scalars(select(Script).where(Script.slug == slug)).one_or_none()

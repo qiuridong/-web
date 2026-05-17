@@ -34,6 +34,7 @@ from app.core.crypto import FernetCipher, get_cipher
 from app.core.exceptions import (
     ConcurrentRunConflict,
     ConflictError,
+    CronExprInvalidError,
     InstanceNotFound,
     ScriptNotFound,
     ValidationError,
@@ -54,6 +55,30 @@ if TYPE_CHECKING:
 # ============================================================
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _validate_cron_expr(expr: str | None) -> None:
+    """audit High #10:cron 写库前先校验合法性。
+
+    用 APScheduler 的 ``CronTrigger.from_crontab`` 做语义解析,失败立即抛
+    ``CronExprInvalidError`` 422,不让非法 cron 进库 → scheduler 不再炸。
+
+    :raises CronExprInvalidError: cron 字符串语义非法
+    """
+    if expr is None:
+        return
+    expr = expr.strip()
+    if not expr:
+        return
+    try:
+        from apscheduler.triggers.cron import CronTrigger  # noqa: PLC0415
+
+        CronTrigger.from_crontab(expr)
+    except (ValueError, KeyError) as exc:
+        raise CronExprInvalidError(
+            f"cron 表达式非法: {exc}",
+            details={"cron_expr": expr, "reason": str(exc)},
+        ) from exc
 
 
 def _load_fields(script: Script) -> list[ManifestField]:
@@ -226,6 +251,10 @@ def create_instance(
     # 1. 找脚本
     script = _get_script_by_slug_or_404(db, payload.script_slug)
 
+    # audit High #10:cron 写库前校验(create / update 都做)
+    if payload.cron_expr is not None:
+        _validate_cron_expr(payload.cron_expr)
+
     # 2. 校验 config
     fields = _load_fields(script)
     try:
@@ -341,6 +370,9 @@ def update_instance(
     if payload.cron_expr is not None:
         # 允许空字符串清空(走 default_cron)
         new_cron = payload.cron_expr.strip() or None
+        # audit High #10:写库前 cron 合法性预校验,而不是 reschedule 时才崩
+        if new_cron is not None:
+            _validate_cron_expr(new_cron)
         if new_cron != instance.cron_expr:
             cron_changed = True
         instance.cron_expr = new_cron

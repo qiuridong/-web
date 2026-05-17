@@ -99,8 +99,12 @@ def match_rules(
     if not matched:
         return []
 
-    # 同 channel 取 scope 优先级最高的(instance > script > global);
-    # 同优先级取 id 较大者(便于"用户最后创建的覆盖")
+    # 同 channel 命中多 rule 的 tie-break 决策(audit High #14 锁定 ADR):
+    #   1. 主键:scope 优先级(instance=2 > script=1 > global=0)
+    #   2. 同优先级:**id 较大者**胜出(即"用户最后创建的规则覆盖"语义)
+    # 选 id 大者而非 id 小者:用户在配过 global 兜底后又针对 script 加规则,
+    # 直觉期望"新加的覆盖旧的"。设计稿 § 1.6 未明确规定此项,本实现固化为
+    # ADR;变更需通知前端 + 写迁移注释。
     best_per_channel: dict[int, NotificationRule] = {}
     for r in matched:
         existing = best_per_channel.get(r.channel_id)

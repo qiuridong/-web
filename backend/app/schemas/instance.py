@@ -181,9 +181,16 @@ class InstanceDetail(BaseModel):
     关键(设计稿 § 5.2):
     - ``config`` 字段中 secret 字段值已置为 ``None``
     - ``_secret_set`` 标识每个 secret 字段是否已配置过非空值
+
+    audit High #11:加 ``populate_by_name=True``,确保 service 层 ``model_validate``
+    能接受 `secret_set` 或 `_secret_set` 两种键(防 alias 漂移)。响应仍走
+    ``by_alias`` 输出为 ``_secret_set``。
     """
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        populate_by_name=True,
+    )
 
     id: int
     name: str

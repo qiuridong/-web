@@ -94,6 +94,7 @@ def list_instances(
 @router.post(
     "",
     response_model=InstanceDetail,
+    response_model_by_alias=True,  # audit High #11:显式确保 secret_set → _secret_set
     status_code=status.HTTP_201_CREATED,
     summary="创建实例(config 严格校验 + secret 加密落库)",
 )
@@ -131,6 +132,7 @@ def create_instance(
 @router.get(
     "/{instance_id}",
     response_model=InstanceDetail,
+    response_model_by_alias=True,  # audit High #11
     summary="实例详情(secret 自动脱敏)",
 )
 def get_instance(
@@ -151,6 +153,7 @@ def get_instance(
 @router.patch(
     "/{instance_id}",
     response_model=InstanceDetail,
+    response_model_by_alias=True,  # audit High #11
     summary="部分更新实例(secret 字段未提交 = 保留原值)",
 )
 def update_instance(
@@ -211,6 +214,7 @@ def delete_instance(
 @router.post(
     "/{instance_id}/enable",
     response_model=InstanceDetail,
+    response_model_by_alias=True,  # audit High #11
     summary="启用实例(并注册到调度器)",
 )
 def enable_instance(
@@ -237,6 +241,7 @@ def enable_instance(
 @router.post(
     "/{instance_id}/disable",
     response_model=InstanceDetail,
+    response_model_by_alias=True,  # audit High #11
     summary="禁用实例(从调度器摘除)",
 )
 def disable_instance(
@@ -267,6 +272,7 @@ def disable_instance(
 @router.post(
     "/{instance_id}/pause",
     response_model=InstanceDetail,
+    response_model_by_alias=True,  # audit High #11
     summary="临时暂停到指定时刻",
 )
 def pause_instance(
@@ -292,6 +298,7 @@ def pause_instance(
 @router.post(
     "/{instance_id}/resume",
     response_model=InstanceDetail,
+    response_model_by_alias=True,  # audit High #11
     summary="立即恢复(清除 paused_until)",
 )
 def resume_instance(
@@ -329,7 +336,9 @@ def run_instance(
     """🔒 立即触发;返回 ``{ run_id }``;若并发槽位满会排队。"""
     scheduler = getattr(request.app.state, "scheduler", None)
     if scheduler is None:
-        raise RuntimeError("Scheduler 尚未初始化")
+        # audit High #12:用 503 替代裸 RuntimeError(原 500 + ERROR 日志污染)
+        from app.core.exceptions import SchedulerNotReady  # noqa: PLC0415
+        raise SchedulerNotReady("Scheduler 尚未初始化")
 
     user_id = getattr(user, "id", None)
     run_id = instance_service.trigger_instance(
