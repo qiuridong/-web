@@ -75,6 +75,22 @@ const errorMiddleware: Middleware = {
   },
   async onError({ error }): Promise<void> {
     // 网络层错误(断网、CORS、超时等);只 sniff,不替换原始 error
+
+    // ⚠️ 关键:过滤 AbortError —— React Query 在组件 unmount / 表单关闭 / refetch 抢占时
+    // 会主动 abort pending fetch,这是正常行为,不应该 toast 给用户看
+    // (历史 bug:用户创建实例成功后看到 "signal is aborted without reason" 红色 toast 误以为失败)
+    const err = error as { name?: string; message?: string; code?: string };
+    const msg0 = err?.message ?? '';
+    if (
+      err?.name === 'AbortError' ||
+      err?.code === 'ERR_CANCELED' ||
+      msg0.includes('aborted') ||
+      msg0.includes('signal is aborted') ||
+      msg0.includes('The user aborted')
+    ) {
+      return; // 静默忽略
+    }
+
     if (isUnauthorized(error)) {
       window.dispatchEvent(new CustomEvent('app:unauthorized'));
     } else if (isServerError(error)) {

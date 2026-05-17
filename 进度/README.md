@@ -53,7 +53,9 @@ docker compose logs -f backend      # 看日志
 
 **2026-05-17 PM · 用户授权后续 3 件事**:(1)修 audit High 剩 7 项(opus agent 后台跑中,本机改 + verify,不部署)/ (2)用户名 admin 保持不变,密码用户已自改强密码 ✅ / (3)Web 脚本管理 MVP-5(**用户澄清后重新定义**:主功能 = **上传现成脚本目录/zip 到 scripts/ 自动入库**,次要 = 在线小修单文件;**不是** Monaco 全套 IDE)。设计稿已重写 [设计/Web脚本编辑器.md](设计/Web脚本编辑器.md),用 react-dropzone 上传 + CodeMirror 轻编辑器(总 bundle 增量 ~200KB),实施约 50 分钟(并行)。用户并行去抓包第二个签到脚本(候选 B 站 / V2EX 等)。
 
-**2026-05-17 晚 · 🎉 多合一里程碑 N=2 + audit High 部署上线** — (1)PTFans 第二个真签到脚本完成并入库,opus agent 分析 3.1MB HAR 写 5 文件 + dry-run 3/3 过(NexusPHP 纯 GET `/attendance.php`,唯一 cookie `c_secure_pass` 1+ 年有效,无 turnstile)/ (2)audit High 7 项加固一并部署(节省一次 docker rebuild)/ (3)生产 smoke test 全绿:`/health` 200 / `/openapi.json` **404**(#9 生效)/ order 参数 401(#13 通过校验被 auth 拦)/ (4)修了我自己写错的协议文档 `项目说明.md § 3.3`:脚本协议是 `run(config, context) -> RunResult` 函数模型,**不是**裸 stdin/stdout(已纠正)。详见 [变更/2026-05-17-PTFans脚本+audit部署.md](变更/2026-05-17-PTFans脚本+audit部署.md)。**用户下一步**:浏览器 /scripts 重新扫描 → 看到 PTFans → 建实例 → 填 c_secure_pass cookie。
+**2026-05-17 晚 · 🎉 多合一里程碑 N=2 + audit High 部署上线** — (1)PTFans 第二个真签到脚本完成并入库,opus agent 分析 3.1MB HAR 写 5 文件 + dry-run 3/3 过(NexusPHP 纯 GET `/attendance.php`,唯一 cookie `c_secure_pass` 1+ 年有效,无 turnstile)/ (2)audit High 7 项加固一并部署(节省一次 docker rebuild)/ (3)生产 smoke test 全绿:`/health` 200 / `/openapi.json` **404**(#9 生效)/ order 参数 401(#13 通过校验被 auth 拦)/ (4)修了我自己写错的协议文档 `项目说明.md § 3.3`:脚本协议是 `run(config, context) -> RunResult` 函数模型,**不是**裸 stdin/stdout(已纠正)。详见 [变更/2026-05-17-PTFans脚本+audit部署.md](变更/2026-05-17-PTFans脚本+audit部署.md)。
+
+**2026-05-17 深夜 · 前端 abort 错误 toast 静默 hotfix(v1 + v2 两轮)** — v1 修 `client.ts onError` 过滤 5 种 abort 错误(hash `index-JmCKC6a4.js`)。用户反馈"abort 还经常出现,做任何修改都有可能" → v2 发现 `query-client.ts` 的 `QueryClient.defaultOptions.mutations.onError` 是**第二层 toast 入口**(任何 useMutation 错误都落这,所有"修改"操作都触发),v1 完全漏了。v2 抽 `isAbortError()` 通用判定,在 `query-client.ts` 三处用上(mutations.onError + queries.retry),`client.ts` v1 逻辑保留作双层兜底 → 新 hash **`index-CP_QytwL.js`** → scp dist 替换。**用户下一步**:Ctrl+F5 硬刷新拿 `CP_QytwL` 验证彻底静默 → 去 `/scripts/ptfans` 实例 Tab 点"立即运行"。详见 [变更/2026-05-17-前端abort错误toast静默-hotfix.md](变更/2026-05-17-前端abort错误toast静默-hotfix.md)(末尾 v2 段)。**遗留 UX bug**:实例 name 必填但表单没 client-side 提示,后端 422 也没把字段错误抽出来显示(只显示通用"未知错误"),下次修。**教训**:做全局错误处理 fix,必须 grep 所有 `toast.error` + `onError` 入口,不能只看一个 middleware 就收手。
 
 **MVP-4 已上线** — 在 2026-05-16 后段部署到生产,137 后端断言全过 + coklw 真签到走通。
 
@@ -154,6 +156,7 @@ docker compose logs -f backend      # 看日志
 
 | 日期 | 标题 | 文件 |
 |---|---|---|
+| 2026-05-17 | **前端 abort 错误 toast 静默 hotfix**(`client.ts onError` 漏过滤 AbortError 导致用户被红色误导)+ dist 替换 `index-JmCKC6a4.js` | [变更/2026-05-17-前端abort错误toast静默-hotfix.md](变更/2026-05-17-前端abort错误toast静默-hotfix.md) |
 | 2026-05-17 | 🎉 **PTFans 真签到脚本上线**(多合一 N=2,NexusPHP)+ **audit High 7 项加固一并部署**,生产 smoke 全绿 | [变更/2026-05-17-PTFans脚本+audit部署.md](变更/2026-05-17-PTFans脚本+audit部署.md) |
 | 2026-05-17 | audit High 7 项加固本机完成 + 178 断言全过(已部署见上条) | [变更/2026-05-17-audit-High-7项加固.md](变更/2026-05-17-audit-High-7项加固.md) |
 | 2026-05-17 | 🎉 **git init + 推 GitHub 完成**(`qiuridong/-web`,237 文件)+ 项目说明.md + .gitignore 安全加固 + Obsidian 笔记 | [变更/2026-05-17-git-init-与项目说明文档.md](变更/2026-05-17-git-init-与项目说明文档.md) |
