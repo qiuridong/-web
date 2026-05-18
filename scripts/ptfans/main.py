@@ -71,13 +71,22 @@ RE_TODAY_RANK = re.compile(
     r'今日签到排名[:：]\s*<b[^>]*>\s*(\d+)\s*</b>',
     re.IGNORECASE,
 )
-# 顶部用户区
+# 顶部用户区(用于 _parse_user_info 抽用户名;基于 HAR 样本,可能某些主题不匹配)
 RE_USERNAME = re.compile(
     r'href="[^"]*userdetails\.php\?id=(\d+)[^"]*"[^>]*class="?User_Name"?[^>]*>\s*<b>([^<]+)</b>',
     re.IGNORECASE,
 )
 RE_BONUS_VALUE = re.compile(
     r"魔力值\s*</font>\s*\[<a[^>]*>使用</a>\]\s*[:：]?\s*([\d.,]+)",
+    re.IGNORECASE,
+)
+# 2026-05-18 hotfix:登录态宽松判定。
+# 原因:RE_USERNAME 太严格(必须 class="User_Name"),不同 NexusPHP 主题
+#       (BambooGreen 等)用的 class 名不一样 → 已登录页面被误判为未登录。
+# 修法:只要含 userdetails.php?id=<数字> 或 logout 链接 = 登录态信号。
+#       PT 站首页通常没指向"其它用户"的 userdetails 链接,该判定足够准确。
+RE_LOGGED_IN_HINT = re.compile(
+    r'(href="[^"]*userdetails\.php\?id=\d+|href="[^"]*logout\.php)',
     re.IGNORECASE,
 )
 # 未登录态(NexusPHP 通常会跳到 login.php 或显示 takelogin 表)
@@ -198,10 +207,15 @@ def _check_signed_status(html: str) -> tuple[bool | None, float | None]:
 
 
 def _check_logged_in(html: str) -> bool:
-    """页面顶部有 username 链接即视为已登录;若看到 takelogin form 则一定未登录。"""
+    """页面有 userdetails/logout 链接即视为已登录;若看到 takelogin form 则一定未登录。
+
+    2026-05-18 hotfix:原来用 RE_USERNAME 太严格(要求 class="User_Name"),不同
+    主题(BambooGreen 等)class 名不同 → 已登录页面被误判未登录。
+    现用 RE_LOGGED_IN_HINT 宽松匹配(userdetails.php?id=<数字> 或 logout 链接)。
+    """
     if RE_LOGIN_FORM.search(html):
         return False
-    return bool(RE_USERNAME.search(html))
+    return bool(RE_LOGGED_IN_HINT.search(html))
 
 
 def _parse_sign_result(html: str) -> dict[str, Any]:

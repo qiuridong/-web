@@ -230,7 +230,7 @@ def disable(
 @router.delete(
     "/{slug}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="从 DB 删除脚本登记(不删磁盘)",
+    summary="从 DB 删除脚本登记(可选同步删磁盘文件)",
 )
 def delete(
     slug: str,
@@ -241,15 +241,47 @@ def delete(
         bool,
         Query(description="必须为 true,否则拒绝"),
     ] = False,
+    delete_files: Annotated[
+        bool,
+        Query(
+            description=(
+                "MVP-5 新增:同时 rm -rf 磁盘目录 ``scripts/<slug>/``。"
+                "默认 False(只删 DB 行,保留磁盘文件)。"
+            ),
+        ),
+    ] = False,
 ) -> Response:
-    """🔒 必须带 ``?confirm=true``;级联删除其 instance / run,**不删磁盘文件**。"""
+    """🔒 必须带 ``?confirm=true``;级联删 instance / run。
+
+    MVP-5 增强:加 ``?delete_files=true`` 同时 rm 整个 ``scripts/<slug>/`` 目录。
+    默认 False(保持向后兼容,旧调用方语义不变)。
+    """
     if not confirm:
         raise ValidationError(
             message="删除脚本需要带 ?confirm=true 参数",
             details={"field": "confirm", "expected": True},
         )
 
+    # 先删 DB 行(若失败不会动磁盘)
     script_service.delete_script(db, slug)
     db.commit()
+
+    # 再可选删磁盘(MVP-5)
+    if delete_files:
+        from app.config import get_settings as _get_settings  # noqa: PLC0415
+        from app.services import script_upload_service  # noqa: PLC0415
+        from app.core.exceptions import ScriptNotFound  # noqa: PLC0415
+
+        try:
+            script_upload_service.delete_script_files(
+                _get_settings().scripts_dir.resolve(), slug
+            )
+        except ScriptNotFound:
+            # 磁盘目录不存在(可能 DB 残留)— 不视为错误,DB 行已删
+            logger.info(
+                "delete_files=true 但磁盘目录已不存在 slug={}",
+                slug,
+            )
+
     response.status_code = status.HTTP_204_NO_CONTENT
     return response

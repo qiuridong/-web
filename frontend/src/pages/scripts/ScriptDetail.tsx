@@ -57,6 +57,9 @@ import InstancesPanel from '@/components/common/InstancesPanel';
 import LogViewer from '@/components/common/LogViewer';
 import PageHeader from '@/components/common/PageHeader';
 import RunsPanel from '@/components/common/RunsPanel';
+import FileEditDialog from './components/FileEditDialog';
+import ScriptFileList from './components/ScriptFileList';
+import type { ScriptFileItem } from '@/api/hooks/useScriptFiles';
 
 import {
   useDisableScript,
@@ -98,6 +101,12 @@ export function ScriptDetail() {
   };
   const [activeTab, setActiveTab] = useState<TabValue>(initialState.activeTab ?? 'overview');
   const [selectedRunId, setSelectedRunId] = useState<number | undefined>(initialState.runId);
+
+  // === MVP-5:文件编辑 / 查看 Dialog 状态 ===
+  const [editingFile, setEditingFile] = useState<{
+    file: ScriptFileItem;
+    mode: 'edit' | 'view';
+  } | null>(null);
 
   // 实时日志 tab 用:列最近 20 条 run 供切换
   const { data: recentRuns } = useRuns({
@@ -300,8 +309,13 @@ export function ScriptDetail() {
         </TabsList>
 
         {/* 概览 */}
-        <TabsContent value="overview" className="mt-5">
+        <TabsContent value="overview" className="mt-5 space-y-5">
           <OverviewPanel script={script} />
+          <ScriptFileList
+            slug={script.slug}
+            onView={(file) => setEditingFile({ file, mode: 'view' })}
+            onEdit={(file) => setEditingFile({ file, mode: 'edit' })}
+          />
         </TabsContent>
 
         {/* 实例 */}
@@ -372,6 +386,20 @@ export function ScriptDetail() {
           <ReadmePanel md={script.readme_md ?? ''} />
         </TabsContent>
       </Tabs>
+
+      {/* MVP-5:文件编辑 / 查看 Dialog */}
+      {editingFile ? (
+        <FileEditDialog
+          open={!!editingFile}
+          onOpenChange={(open) => {
+            if (!open) setEditingFile(null);
+          }}
+          slug={script.slug}
+          path={editingFile.file.path}
+          meta={editingFile.file}
+          mode={editingFile.mode}
+        />
+      ) : null}
     </div>
   );
 }

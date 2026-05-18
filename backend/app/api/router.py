@@ -15,6 +15,7 @@ from app.api.v1 import (
     instances,
     notifications,
     runs,
+    script_upload,
     scripts,
     settings,
 )
@@ -25,6 +26,8 @@ api_router = APIRouter(prefix="/api/v1")
 # 顺序按设计稿 § 2.1 → 2.7
 api_router.include_router(auth.router)
 api_router.include_router(scripts.router)
+# MVP-5:上传 + 在线编辑端点,与 scripts.router 共享 /scripts 前缀
+api_router.include_router(script_upload.router)
 api_router.include_router(instances.router)
 api_router.include_router(runs.router)
 api_router.include_router(notifications.router)

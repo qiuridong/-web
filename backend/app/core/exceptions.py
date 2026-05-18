@@ -166,6 +166,23 @@ class ConcurrentRunConflict(ConflictError):
 
 
 # ============================================================
+# 413 — 请求体过大(MVP-5 上传/编辑场景:zip / file 超阈值)
+# ============================================================
+class PayloadTooLarge(AppException):
+    """MVP-5 引入:上传 zip 或单文件超大小上限时抛出,区别于 429 限流。
+
+    用于 ``script_upload_service``:
+    - zip 总大小 > 1 MiB → 抛此异常
+    - 单文件 > 256 KiB → 抛此异常
+    - PUT /files/{path} body > 256 KiB → 抛此异常
+    """
+
+    code = "PAYLOAD_TOO_LARGE"
+    status_code = 413
+    default_message = "请求体过大"
+
+
+# ============================================================
 # 429 — 资源限流
 # ============================================================
 class ResourceLimitError(AppException):

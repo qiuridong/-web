@@ -195,11 +195,48 @@ def _build_env(
     env["SCRIPT_SLUG"] = script_slug
     env["DATA_DIR"] = data_dir
 
-    # audit Critical #1:**不**透传 PYTHONPATH。sandbox_runner.py 是独立脚本,
-    # 用绝对路径直接启动(见 _run_subprocess);它自己处理 sys.path 隔离。
-    # 严禁:任何 ENCRYPTION_KEY / DATABASE_URL / PYTHONPATH 系列变量透传
+    # ============================================================
+    # PYTHONPATH 安全透传(2026-05-18 hotfix,fix MVP-4 audit Critical #1 过头修复)
+    # ------------------------------------------------------------
+    # 历史:audit Critical #1(2026-05-16)修复时一刀切禁止 PYTHONPATH 透传,
+    #       假设第三方依赖在 backend/.venv/Lib/site-packages(本机开发模式 OK)。
+    # 真相:生产 Docker 走 `uv pip install --target /deps` + `ENV PYTHONPATH=/deps`,
+    #       第三方包(httpx 等)在 /deps,不在 site-packages。子进程没继承
+    #       PYTHONPATH → import httpx 失败 → 所有用 httpx 的脚本(coklw/ptfans)
+    #       scheduled 触发 100% 失败("脚本加载失败 ModuleNotFoundError")。
+    # 修复:**白名单透传** PYTHONPATH —— 过滤掉指向 backend/ 的路径
+    #       (防 import app.*),保留 /deps 等纯第三方依赖路径。
+    # 安全性:与 audit Critical #1 目标对齐 —— 子进程仍然不能 import app.*
+    #       (因 backend/ 路径会被过滤;sandbox_runner._isolate_sys_path 也兜底)。
+    # ============================================================
+    parent_pythonpath = os.environ.get("PYTHONPATH", "")
+    if parent_pythonpath:
+        safe_paths: list[str] = []
+        for p in parent_pythonpath.split(os.pathsep):
+            if not p:
+                continue
+            try:
+                abs_p = Path(p).resolve()
+            except (OSError, ValueError):
+                continue
+            # 拒绝 backend/ 本身(防 import app)
+            if abs_p == _BACKEND_DIR:
+                continue
+            # 拒绝 backend/ 任何子路径(兜底,防有人把 backend/app 加 PYTHONPATH)
+            try:
+                if abs_p.is_relative_to(_BACKEND_DIR):
+                    continue
+            except (ValueError, AttributeError):
+                # is_relative_to 3.9+;older fallback
+                if str(abs_p).startswith(str(_BACKEND_DIR) + os.sep):
+                    continue
+            safe_paths.append(p)  # 原样保留(不是 abs_p 字符串,保持原路径形态)
+        if safe_paths:
+            env["PYTHONPATH"] = os.pathsep.join(safe_paths)
 
     # 透传白名单(过滤敏感项 — 防 env_passthrough 配错)
+    # PYTHONPATH 已经在上面安全透传,这里若 env_passthrough 又含 PYTHONPATH
+    # 也要拒绝(避免脚本作者覆盖)
     _FORBIDDEN = {
         "PYTHONPATH",
         "ENCRYPTION_KEY",

@@ -186,6 +186,27 @@ export default defineConfig({
           if (inPkg('cmdk')) {
             return 'vendor-cmdk';
           }
+          // MVP-5:CodeMirror + 语言包 + 间接依赖一起进 chunk,React.lazy 触发才加载。
+          // 注意 crelt / style-mod / w3c-keyname / @lezer/* / @marijn/* / @uiw/codemirror-* 都是
+          // codemirror 运行时 peer dep,不归这里会被 vendor-misc 兜底 → 形成
+          // vendor-codemirror -> vendor-misc -> vendor-codemirror 循环。
+          if (
+            p.includes('/node_modules/@codemirror/') ||
+            p.includes('/node_modules/@lezer/') ||
+            p.includes('/node_modules/@marijn/') ||
+            p.includes('/node_modules/@uiw/react-codemirror/') ||
+            p.includes('/node_modules/@uiw/codemirror-') ||
+            inPkg('codemirror') ||
+            inPkg('crelt') ||
+            inPkg('style-mod') ||
+            inPkg('w3c-keyname') ||
+            inPkg('js-yaml')
+          ) {
+            return 'vendor-codemirror';
+          }
+          if (inPkg('react-dropzone') || inPkg('attr-accept') || inPkg('file-selector')) {
+            return 'vendor-dropzone';
+          }
           // 其余三方一律归入 vendor-misc(小工具:clsx / tailwind-merge / sonner / zustand 等)
           return 'vendor-misc';
         },

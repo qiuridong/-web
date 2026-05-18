@@ -27,6 +27,7 @@ import {
   MoreHorizontal,
   Pause,
   PlayCircle,
+  Plus,
   RefreshCw,
   Search,
   Table as TableIcon,
@@ -69,6 +70,7 @@ import DataTable from '@/components/common/DataTable';
 import EmptyState from '@/components/common/EmptyState';
 import PageHeader from '@/components/common/PageHeader';
 import { ScriptCard, type ScriptCardData } from '@/components/common/ScriptCard';
+import UploadScriptDialog from './components/UploadScriptDialog';
 
 import {
   useDeleteScript,
@@ -115,6 +117,9 @@ export function ScriptList() {
 
   // === 删除二次确认 ===
   const [deleteTarget, setDeleteTarget] = useState<ScriptListItem | null>(null);
+
+  // === 上传 Dialog ===
+  const [uploadOpen, setUploadOpen] = useState(false);
 
   // === 派生 ===
   const isEmpty = !isLoading && (!scripts || scripts.length === 0);
@@ -278,13 +283,22 @@ export function ScriptList() {
               />
               <span className="ml-1.5 hidden sm:inline">刷新</span>
             </Button>
-            <Button onClick={handleScan} disabled={scan.isPending}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleScan}
+              disabled={scan.isPending}
+            >
               {scan.isPending ? (
                 <Loader2 className="size-4 animate-spin" strokeWidth={1.75} />
               ) : (
                 <RefreshCw className="size-4" strokeWidth={1.75} />
               )}
-              <span className="ml-1.5">扫描脚本</span>
+              <span className="ml-1.5">重新扫描</span>
+            </Button>
+            <Button onClick={() => setUploadOpen(true)}>
+              <Plus className="size-4" strokeWidth={2} />
+              <span className="ml-1.5">添加脚本</span>
             </Button>
           </>
         }
@@ -452,6 +466,9 @@ export function ScriptList() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* 上传脚本 Dialog */}
+      <UploadScriptDialog open={uploadOpen} onOpenChange={setUploadOpen} />
     </div>
   );
 }
