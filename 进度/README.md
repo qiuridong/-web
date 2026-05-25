@@ -49,6 +49,8 @@ docker compose logs -f backend      # 看日志
 
 ## 当前状态
 
+**2026-05-25 凌晨 · 🎨 通知中心 UI 三轮增强上线 + 脚本同步 Pull 方案设计稿(未实施)** — (1)新建 `frontend/src/lib/notification-presets.ts`(13 个 apprise 渠道 URL 预设 / 5 个 Jinja2 模板预设 / 5 组字段速查变量);(2)`NotificationHub.tsx` 改造:ChannelSheet 加渠道类型预设下拉(选 QQ 邮箱/Telegram 等自动填 URL 模板 + helper 文案告诉授权码哪里拿),RuleSheet 加模板预设下拉 + 字段速查折叠区(点击 `{{ run.status }}` 等字段插入到光标位置);(3)修 Sheet 内容溢出遮挡保存按钮 — header/scroll/footer 三段式 + `min-h-0` + `scrollbar-gutter:stable`;(4)修 Select 长下拉打开向下展开遮挡其它字段 — 全部 7 个 `<SelectContent>` 加 `max-h-[280px]`;**4 轮 frontend dist 部署**最终线上 hash **`index-DCgPEn8u.js`**(备份 `dist.backup.20260524-130207/131639/132641/133331/`)。**未实施 · 脚本同步 Pull 方案设计稿**:用户问"zip 脚本部署到指定 VPS 似乎没这功能",grep 确认 agent 现状靠**手动 scp**(`agent/README.md` 明写),设计 backend +2 endpoint(GET `/agent/scripts/<slug>/manifest` + `/bundle.zip`)+ agent `_ensure_script_synced` ~80 行(比对 hash → 拉 zip → 原子解压 → 写 marker),触发时机在 `_execute_task()` sandbox_runner 前,工作量约 200 行 / 45-60min,**等用户拍板**(推荐明早 09:00 cron 验证 OK 后做,今晚动 agent 会模糊明早 cron 失败的根因)。详见 [变更/2026-05-25-通知UI增强+脚本同步Pull方案设计.md](变更/2026-05-25-通知UI增强+脚本同步Pull方案设计.md)。
+
 **2026-05-17 · git init + 推 GitHub 完成 ✅** — 用户创建 `qiuridong/-web` 仓库后,PM 执行 `git init` + first commit(237 文件,hash `704b47f`)+ `git push -u origin main` 成功。新增 `项目说明.md`(~480 行,面向真人的中文说明)+ `.gitignore` 安全加固(补 `/backend/data/` 拦 encryption.key)+ Obsidian 笔记 `D:\dd\deom\签到聚合\项目-签到管家.md`。详见 [`变更/2026-05-17-git-init-与项目说明文档.md`](变更/2026-05-17-git-init-与项目说明文档.md)。
 
 **2026-05-17 PM · 用户授权后续 3 件事**:(1)修 audit High 剩 7 项(opus agent 后台跑中,本机改 + verify,不部署)/ (2)用户名 admin 保持不变,密码用户已自改强密码 ✅ / (3)Web 脚本管理 MVP-5(**用户澄清后重新定义**:主功能 = **上传现成脚本目录/zip 到 scripts/ 自动入库**,次要 = 在线小修单文件;**不是** Monaco 全套 IDE)。设计稿已重写 [设计/Web脚本编辑器.md](设计/Web脚本编辑器.md),用 react-dropzone 上传 + CodeMirror 轻编辑器(总 bundle 增量 ~200KB),实施约 50 分钟(并行)。用户并行去抓包第二个签到脚本(候选 B 站 / V2EX 等)。
@@ -184,6 +186,7 @@ docker compose logs -f backend      # 看日志
 
 | 日期 | 标题 | 文件 |
 |---|---|---|
+| 2026-05-25 凌晨 | 🎨 **通知中心 UI 三轮增强上线 + 脚本同步 Pull 方案设计稿(未实施)** — `notification-presets.ts` 新建(13 渠道 URL + 5 Jinja2 模板 + 5 组字段速查);`NotificationHub.tsx` 改造(ChannelSheet/RuleSheet 预设下拉 + 字段速查 + Sheet 三段式 sticky footer + SelectContent `max-h-[280px]` 防遮挡);4 轮 dist 部署最终 hash `index-DCgPEn8u.js`;**脚本同步 Pull 方案**设计稿出(backend +2 endpoint + agent `_ensure_script_synced`,~200 行 45-60min)等用户拍板,推荐明早 cron 验证后做 | [变更/2026-05-25-通知UI增强+脚本同步Pull方案设计.md](变更/2026-05-25-通知UI增强+脚本同步Pull方案设计.md) |
 | 2026-05-24 深夜 | 🎊🎊🎊 **MVP-1 端到端首次真测成功(run 27,49 秒)+ systemd 资源调优 + 平台级 manual 跳延迟** — 排出 ReadTimeout 真因 = systemd `TasksMax=128` 太小(Chrome fork rejected);patch unit `MemoryMax 2G + TasksMax 4096`;manual 跳延迟从脚本层提到 `sandbox_runner` 平台层(所有脚本统一);run 27 web 立即运行 49 秒拿"已签:finished",链路 100% 通;意外发现 run 26 Chrome 没启没耗 CF 信任分 | [变更/2026-05-24-MVP1端到端真测成功+systemd调优+平台级跳延迟.md](变更/2026-05-24-MVP1端到端真测成功+systemd调优+平台级跳延迟.md) |
 | 2026-05-24 下午-晚 | 🎉🎉🎉 **MVP-1 完整上线生产 + e2e 链路通 + 6 UX fix + v1.2** — Phase 3 全部署(backend rebuild + alembic 0002 + frontend dist + agent install on VPS-JM 节点 vps-us8-8-jm + 停 host crontab);run 26 跑完整链路验证 ✅(CF 超时是预期);6 UX fix:heartbeat lock / 节点 Terminal 按钮重看安装命令 / shadcn Tooltip / 创建实例"未知错误"(serialize 缺 node_id)/ 编辑实例节点显示错 / "●未知"→"●待运行";v1.2 manual 跳 random_delay。明早 9-10 北京自动 cron 真签到验证 | [变更/2026-05-24-MVP1部署上线+6个UX修复+v1.2manual跳延迟.md](变更/2026-05-24-MVP1部署上线+6个UX修复+v1.2manual跳延迟.md) |
 | 2026-05-24 中午 | 🎯 **MVP-1 接力实施 Phase 0/1/2 完成** — opus agent 凌晨中断时只做了 backend 50%;我接手补 agent CLI(`signin_agent.py` 790 行 + install.sh + README + config.example)+ frontend(`nodes.ts` hooks + `NodeList.tsx` + 路由 + 导航 + `InstanceFormSheet` 加节点下拉)+ backend schema 补丁(InstanceCreate/Update 加 `node_id` + service 校验);`_verify_e2e.py` 11/11 ✅(金标准)+ `pnpm build` ✅;等 Phase 3 部署授权 | [变更/2026-05-24-MVP1接力实施-agent+frontend+backend补丁.md](变更/2026-05-24-MVP1接力实施-agent+frontend+backend补丁.md) |
@@ -235,10 +238,12 @@ docker compose logs -f backend      # 看日志
 
 | 项 | 备注 |
 |---|---|
+| **5-25 09:00-10:00 北京 jmcomic agent cron 真测** | ⏸ **P0** — 今晚 host crontab 已停 + agent 部署到 VPS-JM(节点 `vps-us8-8-jm`)+ 实例 cron `0 1 * * *`(UTC)+ random_delay 0-3600s。验证项:走 random_delay(非 manual)/ CF 一次过(IP 信任分恢复)/ POST /sign HTTP 200 / **真 JCoin/EXP 到账**。结果决定:✅ → 整链路 production-ready / ❌ → 看具体失败模式调整 |
+| **脚本同步 Pull 方案是否实施** | ⏸ 设计稿已出([变更/2026-05-25-通知UI增强+脚本同步Pull方案设计.md](变更/2026-05-25-通知UI增强+脚本同步Pull方案设计.md) § 2),~200 行 / 45-60min;3 选项 A 立即/B 明早 cron 后/C 不做加 curl 命令;**推荐 B**(今晚已 4 轮前端部署,避免动 agent 模糊明早 cron 根因) |
+| **通知中心真测** | 用户已建 QQ 邮箱渠道,Ctrl+F5 拿新 dist `index-DCgPEn8u.js` 后用预设填好 → 点测试发送看是否真收到邮件;若失败排查 apprise URL 占位符是否替换干净 |
 | 第一个 demo 签到脚本选什么? | ✅ 已完成 `coklw`(生产真签到走通);下一个候选 bilibili-daily 验证标准通用性 |
-| 域名与 HTTPS 配置 | 待用户提供生产域名;开发阶段用 localhost |
-| **JM 5-24 自然跑回归测试** | ⏸ **P0 等用户决定:恢复 host crontab(/root/.crontab.backup.20260523-103809)让明早 10:00 自然跑** vs 不恢复。明早结果决定后续:success → 5-23 是临时反爬不急 / 仍失败 → 真反爬升级需新方案 |
-| **JM v3 三层回退方案选型(已降优先级)** | ⏸ **不急,等明早 5-24 自然跑结果再决定** — 5 月失败 3 天里只有 1 天是脚本可优化(5-23),原脚本 CF 33/33 100% 过盾。详见 [设计/JM签到100%可靠性调研.md](设计/JM签到100%可靠性调研.md) + [变更/2026-05-23-JM签到100可靠性调研+5月精确日志重判.md](变更/2026-05-23-JM签到100可靠性调研+5月精确日志重判.md) |
+| 域名与 HTTPS 配置 | ✅ 已完成 `jb.aijiaxia.cc` → 154.9.238.144(2026-05-16) |
+| **JM v3 三层回退方案选型(已降优先级)** | ⏸ **暂搁置** — 5-24 v1.0 host 首跑成功(JCoin:30/EXP:100),v1.1 cookies 复用 + retry refactor 已上线,v1.2 manual 跳延迟由 sandbox_runner 平台层接管,**不再需要 v3 复杂方案**。详见 [设计/JM签到100%可靠性调研.md](设计/JM签到100%可靠性调研.md) |
 
 ## 交接备忘(给下一个 AI / 协作者)
 
