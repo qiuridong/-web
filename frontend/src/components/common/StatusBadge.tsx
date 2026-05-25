@@ -21,6 +21,7 @@ export type Status =
   | 'running'
   | 'pending'
   | 'disabled'
+  | 'never_run'  // 新建实例,从未运行过(待首次触发)
   | 'unknown';
 
 export interface StatusBadgeProps {
@@ -46,6 +47,7 @@ const STATUS_META: Record<Status, StatusMeta> = {
   running: { label: '运行中', dotColor: 'text-info', pulse: true },
   pending: { label: '等待中', dotColor: 'text-warning', pulse: true },
   disabled: { label: '已禁用', dotColor: 'text-muted-foreground', pulse: false },
+  never_run: { label: '待运行', dotColor: 'text-muted-foreground/70', pulse: false },
   unknown: { label: '未知', dotColor: 'text-muted-foreground', pulse: false },
 };
 

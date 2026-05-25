@@ -8,6 +8,26 @@ import { format, formatDistanceToNowStrict, parseISO } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 
 /**
+ * 把任意输入归一化成 Date。
+ *
+ * 2026-05-18 hotfix:后端返回的 datetime ISO 字符串通常 naive(无时区后缀),
+ * 但实际值是 UTC(SQLAlchemy + datetime.utcnow())。date-fns `parseISO`
+ * 看到无时区字符串会**当作本地时间**解析 → 中国用户看到的时间偏 -8 小时
+ * (用户曾误判"凌晨 1 点 cron 没触发",实际是 UI 把 UTC 17:00 显示成 "17:00"
+ * 让他以为是下午 5 点,真实 CST 是凌晨 1 点)。
+ * 修法:string 输入若无显式时区(Z / +HH:MM / -HH:MM),自动补 'Z' 假定 UTC,
+ * 让 parseISO 正确转成本地时间显示。
+ */
+function toDate(input: string | number | Date): Date {
+  if (typeof input === 'string') {
+    const hasTz = /([Zz]|[+-]\d{2}:?\d{2})$/.test(input);
+    return parseISO(hasTz ? input : input + 'Z');
+  }
+  if (typeof input === 'number') return new Date(input);
+  return input;
+}
+
+/**
  * 格式化为绝对时间,默认 'yyyy-MM-dd HH:mm'。
  *
  * @param input ISO 字符串 / Date / number(epoch ms)
@@ -18,14 +38,7 @@ export function formatDate(
   pattern = 'yyyy-MM-dd HH:mm',
 ): string {
   if (input === null || input === undefined) return '—';
-  let d: Date;
-  if (typeof input === 'string') {
-    d = parseISO(input);
-  } else if (typeof input === 'number') {
-    d = new Date(input);
-  } else {
-    d = input;
-  }
+  const d = toDate(input);
   if (Number.isNaN(d.getTime())) return '—';
   return format(d, pattern, { locale: zhCN });
 }
@@ -37,14 +50,7 @@ export function formatDate(
  */
 export function formatRelative(input: string | number | Date | null | undefined): string {
   if (input === null || input === undefined) return '—';
-  let d: Date;
-  if (typeof input === 'string') {
-    d = parseISO(input);
-  } else if (typeof input === 'number') {
-    d = new Date(input);
-  } else {
-    d = input;
-  }
+  const d = toDate(input);
   if (Number.isNaN(d.getTime())) return '—';
   const diffSec = (Date.now() - d.getTime()) / 1000;
   if (diffSec < 30 && diffSec >= 0) return '刚刚';

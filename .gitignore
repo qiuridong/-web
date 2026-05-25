@@ -132,3 +132,7 @@ Icon
 backend/_verify_*.py
 backend/_probe_*.py
 backend/_tmp_*.py
+
+# TypeScript 增量编译缓存(2026-05-25 补)
+*.tsbuildinfo
+frontend/*.tsbuildinfo

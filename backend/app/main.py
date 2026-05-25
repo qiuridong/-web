@@ -80,6 +80,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as exc:  # noqa: BLE001
         logger.warning("启动期 ensure_defaults 失败(跳过) err={}", exc)
 
+    # MVP-1 远程 agent:确保本地节点(id=1)存在(idempotent)
+    try:
+        from app.services import node_service  # noqa: PLC0415
+
+        with SessionLocal() as _node_db:
+            local = node_service.ensure_local_node(_node_db)
+            _node_db.commit()
+            logger.info("本地节点已就绪 id={} slug={}", local.id, local.slug)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("启动期 ensure_local_node 失败(跳过) err={}", exc)
+
     # 启动期同步扫描一次 scripts/(若启用)
     try:
         from app.services import script_service  # noqa: PLC0415

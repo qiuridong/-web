@@ -1,0 +1,5 @@
+# 临时本地分析快照(scp 拉来分析用,不入 git)
+_signin_log_snapshot_*.log
+
+# 失败截图本地副本(实际生产存在 instance data_dir)
+cf_error_*.jpg

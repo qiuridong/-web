@@ -10,9 +10,11 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.v1 import (
+    agent,
     auth,
     dashboard,
     instances,
+    nodes,
     notifications,
     runs,
     script_upload,
@@ -33,3 +35,6 @@ api_router.include_router(runs.router)
 api_router.include_router(notifications.router)
 api_router.include_router(settings.router)
 api_router.include_router(dashboard.router)
+# MVP-1 远程 agent:节点管理(admin / session auth)+ agent 端 API(Bearer auth)
+api_router.include_router(nodes.router)
+api_router.include_router(agent.router)

@@ -72,6 +72,13 @@ class InstanceCreate(BaseModel):
     max_retries: int = Field(default=0, ge=0, le=MAX_RETRIES_LIMIT)
     retry_interval_sec: int = Field(default=60, ge=1, le=RETRY_INTERVAL_LIMIT)
     config: dict[str, Any] = Field(default_factory=dict)
+    # MVP-1:绑定节点(默认 1 = local,主面板自己跑)
+    node_id: int | None = Field(
+        default=None,
+        ge=1,
+        description="节点 ID,默认 1 = local(主面板自身);"
+        "选远程节点后,该实例的所有 run 都派发到该节点跑",
+    )
 
     @field_validator("name", "description")
     @classmethod
@@ -107,6 +114,8 @@ class InstanceUpdate(BaseModel):
     )
     enabled: bool | None = None
     config: dict[str, Any] | None = None
+    # MVP-1:允许改节点(注意:**只改 DB,不动正在跑的 run**;下次触发才生效)
+    node_id: int | None = Field(default=None, ge=1)
 
     @field_validator("name", "description")
     @classmethod
@@ -151,6 +160,7 @@ class InstanceListItem(BaseModel):
     name: str
     description: str | None = None
     script: InstanceScriptBrief
+    node_id: int | None = None  # MVP-1:实例绑定的节点 ID(1=local;None 兼容老数据)
     cron_expr: str | None = None
     timeout_sec: int | None = None
     enabled: bool
@@ -196,6 +206,7 @@ class InstanceDetail(BaseModel):
     name: str
     description: str | None = None
     script: InstanceScriptBrief
+    node_id: int | None = None  # MVP-1:实例绑定的节点 ID(1=local;None 兼容老数据)
     cron_expr: str | None = None
     timeout_sec: int | None = None
     enabled: bool

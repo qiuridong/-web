@@ -591,12 +591,42 @@ async def execute_run(
     :param attempt: 第几次尝试,首次=1
     :param pre_created_run_id: 若上层已先创建 run 行(例如 API 立即触发要
                                 返回 run_id 给前端),传入此 id 复用
+
+    MVP-1 远程 agent 分支
+    --------------------
+    如果 instance.node_id 指向**非 local** 节点,本函数:
+    1. 创建 / 复用 run 行,标记 ``status=pending``、``host=node:<slug>``
+    2. **不阻塞,直接返回 run_id**
+    3. agent 通过 ``GET /api/v1/agent/poll`` 拉走任务后,主面板把状态翻
+       running,等 agent 通过 ``POST /api/v1/agent/runs/{id}/result`` 回传终态
     """
     limiter = get_limiter()
     broker = get_log_broker()
     settings = get_settings()
 
-    # ===== [1] 获取并发槽位 =====
+    # ===== MVP-1 远程 agent 早分流 =====
+    # 先快速查 instance.node_id,若 != local 走远程派单路径
+    # 注意:这里**独立** session,不与下面本地路径的 SessionLocal 共用,避免锁竞争
+    with SessionLocal() as _quick_db:
+        _quick_instance = _quick_db.get(Instance, instance_id)
+        if _quick_instance is None:
+            logger.error("executor: instance {} 不存在", instance_id)
+            if pre_created_run_id:
+                broker.close(pre_created_run_id)
+            return -1
+        _node_id = _quick_instance.node_id
+    # session 关闭后再调远程派单(内部自己开 session)
+    if _node_id is not None and _node_id != 1:
+        return await _dispatch_remote_run(
+            instance_id=instance_id,
+            pre_created_run_id=pre_created_run_id,
+            trigger_type=trigger_type,
+            trigger_user_id=trigger_user_id,
+            parent_run_id=parent_run_id,
+            attempt=attempt,
+        )
+
+    # ===== [1] 获取并发槽位(本地路径)=====
     async with limiter.slot():
         # ===== [2-3] 在 DB session 内创建 / 更新 run + 加载 instance/script =====
         # 注意:每个 run 用独立 session,避免与外部请求 session 干扰
@@ -1066,3 +1096,101 @@ def _extract_env_passthrough(script: Script) -> list[str]:
             "re-parse manifest 失败 slug={}: {}", script.slug, exc
         )
         return []
+
+
+# ============================================================
+# MVP-1 远程 agent 派单
+# ============================================================
+async def _dispatch_remote_run(
+    *,
+    instance_id: int,
+    pre_created_run_id: int | None,
+    trigger_type: str,
+    trigger_user_id: int | None,
+    parent_run_id: int | None,
+    attempt: int,
+) -> int:
+    """远程节点派单 — 创建/复用 pending run,标记 host,立即返回 run_id。
+
+    不阻塞;后续由:
+    - agent ``GET /agent/poll`` 拉走任务 → 主面板翻 status=running
+    - agent ``POST /agent/runs/{id}/result`` 回传终态 → 主面板写 run + sync_instance
+
+    :returns: run_id;失败返 -1
+    """
+    from app.db.models.node import Node  # noqa: PLC0415
+
+    with SessionLocal() as db:
+        instance = db.get(Instance, instance_id)
+        if instance is None:
+            logger.error("_dispatch_remote_run: instance {} 不存在", instance_id)
+            return -1
+
+        node = db.get(Node, instance.node_id) if instance.node_id else None
+        if node is None or node.is_local:
+            # 派单要求节点存在且 != local;否则这里被错误调用了
+            logger.error(
+                "executor: 远程派单失败 — instance.{} node_id={} 不存在或是 local",
+                instance.id,
+                instance.node_id,
+            )
+            return -1
+
+        if not node.enabled:
+            logger.warning(
+                "executor: 跳过 — instance.{} 所在节点 {} 已禁用",
+                instance.id,
+                node.slug,
+            )
+            # 标 cancelled
+            if pre_created_run_id is not None:
+                _finalize_skipped_run(db, pre_created_run_id, "node_disabled")
+                db.commit()
+            return pre_created_run_id or -1
+
+        script = db.get(Script, instance.script_id)
+        if script is None:
+            logger.error(
+                "_dispatch_remote_run: script {} 不存在", instance.script_id
+            )
+            return -1
+
+        now = _utcnow()
+        if pre_created_run_id is not None:
+            run = db.get(Run, pre_created_run_id)
+            if run is None:
+                logger.error(
+                    "_dispatch_remote_run: pre_created_run_id={} 不存在,新建",
+                    pre_created_run_id,
+                )
+                pre_created_run_id = None
+
+        if pre_created_run_id is None:
+            run = Run(
+                instance_id=instance.id,
+                script_slug=script.slug,
+                trigger_type=trigger_type,
+                trigger_user_id=trigger_user_id,
+                parent_run_id=parent_run_id,
+                status="pending",
+                started_at=now,
+            )
+            db.add(run)
+            db.flush()
+            db.refresh(run)
+
+        # 标记 host = node:<slug>,让 UI 一眼看出在哪个节点跑
+        run.host = f"node:{node.slug}"[:64]
+        # 不动 started_at — agent 真正开始跑时翻 running 才更新
+        db.commit()
+        run_id = run.id
+        node_slug = node.slug
+        instance_id_local = instance.id
+
+    logger.info(
+        "remote dispatch: instance.{} → node {!r} run_id={} (pending,等 agent 拉)",
+        instance_id_local,
+        node_slug,
+        run_id,
+    )
+    return run_id

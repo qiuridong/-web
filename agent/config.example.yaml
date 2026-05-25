@@ -1,0 +1,43 @@
+# signin-agent 配置示例
+# 复制到 /etc/signin-agent/config.yaml 后,chmod 600 保护
+# 改完执行 systemctl restart signin-agent
+
+# ============================================================
+# 必需
+# ============================================================
+
+# 主面板地址(就是用户访问 web 的地址)
+master_url: https://jb.aijiaxia.cc
+
+# 节点 token — 由主面板"添加节点"时一次性返回
+# 格式形如 sa_RandomBase64xxxxxxxxxxxxxxxxxxxxxx,长度 ≥ 40
+node_token: sa_REPLACE_WITH_REAL_TOKEN
+
+# 脚本目录 — agent 用 task.script_slug 在此查找 main.py
+# 部署 jmcomic 脚本到这里:
+#   /opt/signin-agent/scripts/jmcomic/main.py
+#   /opt/signin-agent/scripts/jmcomic/manifest.yaml
+#   ...
+scripts_dir: /opt/signin-agent/scripts
+
+# ============================================================
+# 可选(默认值已合理)
+# ============================================================
+
+# Python 解释器(必须能跑 sandbox_runner.py + scripts/*/main.py 依赖)
+python_bin: /usr/bin/python3
+
+# sandbox_runner.py 路径(install.sh 默认放到 /opt/signin-agent/)
+# 从主面板 backend/sandbox_runner.py 拷贝
+sandbox_runner: /opt/signin-agent/sandbox_runner.py
+
+# 实例 data_dir 根(每个实例独立子目录 instance-<id>/,持久化跨执行)
+# 脚本通过 context.data_dir 拿到这个路径
+data_dir: /var/lib/signin-agent/data
+
+# 时区(透传给子进程的 TZ 环境变量;影响脚本内 date / log 时间显示)
+timezone: Asia/Shanghai
+
+# 日志级别(DEBUG / INFO / WARNING / ERROR)
+# DEBUG 会输出每次 heartbeat / poll 失败的详细信息
+log_level: INFO

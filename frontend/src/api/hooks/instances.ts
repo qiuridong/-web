@@ -69,6 +69,8 @@ export interface InstanceDetail extends InstanceListItem {
   config: Record<string, unknown>;
   /** 标记哪些 secret 字段后端已存值(用于 SecretInput 占位文案) */
   _secret_set?: Record<string, boolean>;
+  /** MVP-1 远程 agent:实例绑定的节点 ID(1=local) */
+  node_id?: number | null;
 }
 
 export interface InstanceCreatePayload {
@@ -80,6 +82,8 @@ export interface InstanceCreatePayload {
   max_retries?: number;
   retry_interval_sec?: number;
   config: Record<string, unknown>;
+  /** MVP-1 远程 agent:节点 ID,默认 1 = local */
+  node_id?: number;
 }
 
 export interface InstanceUpdatePayload {
@@ -91,6 +95,8 @@ export interface InstanceUpdatePayload {
   retry_interval_sec?: number;
   /** 未提交的 secret 字段保持原值;部分更新 */
   config?: Record<string, unknown>;
+  /** MVP-1:改节点(只改 DB,下次触发才生效) */
+  node_id?: number;
 }
 
 export interface InstancePausePayload {

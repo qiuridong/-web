@@ -7,10 +7,11 @@
  *   - 渠道:卡片网格(name / type 图标 / enabled / 测试发送)+ 新建渠道(Sheet 表单)
  *   - 规则:DataTable + 新建规则(Sheet 表单)
  */
-import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
 import {
   Bell,
+  BookOpen,
   CheckCircle2,
   CircleX,
   Globe,
@@ -98,6 +99,12 @@ import {
 import { useScripts } from '@/api/hooks/scripts';
 import { useInstances } from '@/api/hooks/instances';
 import { formatRelative } from '@/lib/format';
+import {
+  CHANNEL_PRESETS,
+  TEMPLATE_FIELD_GROUPS,
+  TEMPLATE_FORMAT_NOTE,
+  TEMPLATE_PRESETS,
+} from '@/lib/notification-presets';
 import { cn } from '@/lib/utils';
 
 type Tab = 'channels' | 'rules';
@@ -383,6 +390,12 @@ function ChannelSheet({ open, onOpenChange, channel }: ChannelSheetProps) {
   const [urlTouched, setUrlTouched] = useState(false);
   const [description, setDescription] = useState('');
   const [enabled, setEnabled] = useState(true);
+  const [presetId, setPresetId] = useState<string>('');
+
+  const currentPreset = useMemo(
+    () => CHANNEL_PRESETS.find((p) => p.id === presetId),
+    [presetId],
+  );
 
   // 在打开时初始化
   useMemo(() => {
@@ -392,7 +405,21 @@ function ChannelSheet({ open, onOpenChange, channel }: ChannelSheetProps) {
     setUrlTouched(false);
     setDescription(channel?.description ?? '');
     setEnabled(channel?.enabled ?? true);
+    setPresetId('');
   }, [open, channel]);
+
+  function applyChannelPreset(id: string) {
+    setPresetId(id);
+    const preset = CHANNEL_PRESETS.find((p) => p.id === id);
+    if (!preset) return;
+    setUrl(preset.urlTemplate);
+    setUrlTouched(true);
+    if (preset.urlTemplate) {
+      toast.info('已填入示例 URL,请把占位符(如 BOT_TOKEN、CHAT_ID)换成你的实际值', {
+        duration: 5000,
+      });
+    }
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -428,15 +455,22 @@ function ChannelSheet({ open, onOpenChange, channel }: ChannelSheetProps) {
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="sm:max-w-md">
-        <SheetHeader>
+      <SheetContent
+        side="right"
+        className="flex w-full flex-col gap-0 p-0 sm:max-w-md"
+      >
+        <SheetHeader className="shrink-0 border-b border-border px-6 pb-4 pt-6">
           <SheetTitle>{isEdit ? '编辑渠道' : '新建渠道'}</SheetTitle>
           <SheetDescription>
             v1 仅支持 apprise(覆盖 80+ 渠道,Telegram/邮件/钉钉/飞书 等)
           </SheetDescription>
         </SheetHeader>
 
-        <form onSubmit={handleSubmit} className="mt-6 space-y-5">
+        <form
+          onSubmit={handleSubmit}
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5 [scrollbar-gutter:stable]">
           <div className="space-y-1.5">
             <Label htmlFor="ch-name">
               名称<span className="ml-0.5 text-danger">*</span>
@@ -448,6 +482,40 @@ function ChannelSheet({ open, onOpenChange, channel }: ChannelSheetProps) {
               placeholder="例如 运维 TG / 个人邮箱"
               className="h-10"
             />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>渠道类型预设</Label>
+            <Select value={presetId} onValueChange={applyChannelPreset}>
+              <SelectTrigger className="h-10">
+                <SelectValue placeholder="选一个常用渠道,自动填入 URL 模板" />
+              </SelectTrigger>
+              <SelectContent className="max-h-[280px]">
+                {CHANNEL_PRESETS.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {currentPreset && currentPreset.id !== 'custom' ? (
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                {currentPreset.helper}
+              </p>
+            ) : (
+              <p className="text-[11px] text-muted-foreground">
+                选中后会把 URL 模板填到下方,你只需替换占位符;不熟悉可看{' '}
+                <a
+                  href="https://github.com/caronc/apprise/wiki"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline hover:text-foreground"
+                >
+                  apprise wiki
+                </a>
+                。
+              </p>
+            )}
           </div>
 
           <div className="space-y-1.5">
@@ -464,10 +532,7 @@ function ChannelSheet({ open, onOpenChange, channel }: ChannelSheetProps) {
               placeholder="tgram://BOTTOKEN/CHATID"
             />
             <p className="text-[11px] text-muted-foreground">
-              示例:
-              <code className="ml-1 font-mono">tgram://...</code> /
-              <code className="ml-1 font-mono">mailto://...</code> /
-              <code className="ml-1 font-mono">lark://...</code>
+              默认以密文显示,点 <span className="font-mono">👁</span> 切换明文以编辑占位符。
             </p>
           </div>
 
@@ -489,7 +554,9 @@ function ChannelSheet({ open, onOpenChange, channel }: ChannelSheetProps) {
             </Label>
           </div>
 
-          <SheetFooter className="flex flex-row-reverse gap-2 pt-2">
+          </div>
+
+          <SheetFooter className="flex shrink-0 flex-row-reverse gap-2 border-t border-border bg-background px-6 py-4">
             <Button type="submit" disabled={submitting}>
               {submitting ? (
                 <Loader2 className="mr-1.5 size-4 animate-spin" strokeWidth={1.75} />
@@ -745,6 +812,14 @@ function RuleSheet({ open, onOpenChange, rule }: RuleSheetProps) {
   const [template, setTemplate] = useState('');
   const [minInterval, setMinInterval] = useState('0');
   const [enabled, setEnabled] = useState(true);
+  const [templatePresetId, setTemplatePresetId] = useState<string>('');
+  const [showFields, setShowFields] = useState(false);
+  const templateRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const currentTemplatePreset = useMemo(
+    () => TEMPLATE_PRESETS.find((p) => p.id === templatePresetId),
+    [templatePresetId],
+  );
 
   // 当 scope=instance 时按 script_id 拉实例
   const scriptSlug = useMemo(() => {
@@ -766,7 +841,38 @@ function RuleSheet({ open, onOpenChange, rule }: RuleSheetProps) {
     setTemplate(rule?.template ?? '');
     setMinInterval(String(rule?.min_interval_sec ?? 0));
     setEnabled(rule?.enabled ?? true);
+    setTemplatePresetId('');
+    setShowFields(false);
   }, [open, rule]);
+
+  function applyTemplatePreset(id: string) {
+    setTemplatePresetId(id);
+    const preset = TEMPLATE_PRESETS.find((p) => p.id === id);
+    if (!preset) return;
+    if (template && template.trim() && template !== preset.content) {
+      // 用户已经写过内容,提示一下再覆盖(直接覆盖,toast 告知)
+      toast.info('已用预设模板覆盖你的输入', { duration: 3000 });
+    }
+    setTemplate(preset.content);
+  }
+
+  function insertField(snippet: string) {
+    const el = templateRef.current;
+    if (!el) {
+      setTemplate((t) => (t ? `${t}${snippet}` : snippet));
+      return;
+    }
+    const start = el.selectionStart ?? template.length;
+    const end = el.selectionEnd ?? template.length;
+    const next = template.slice(0, start) + snippet + template.slice(end);
+    setTemplate(next);
+    // 等下一帧把光标定位到插入末尾
+    requestAnimationFrame(() => {
+      el.focus();
+      const caret = start + snippet.length;
+      el.setSelectionRange(caret, caret);
+    });
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -820,15 +926,22 @@ function RuleSheet({ open, onOpenChange, rule }: RuleSheetProps) {
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="sm:max-w-md">
-        <SheetHeader>
+      <SheetContent
+        side="right"
+        className="flex w-full flex-col gap-0 p-0 sm:max-w-md"
+      >
+        <SheetHeader className="shrink-0 border-b border-border px-6 pb-4 pt-6">
           <SheetTitle>{isEdit ? '编辑规则' : '新建规则'}</SheetTitle>
           <SheetDescription>
             匹配优先级:实例 &gt; 脚本 &gt; 全局,同一渠道只触发最具体的一条
           </SheetDescription>
         </SheetHeader>
 
-        <form onSubmit={handleSubmit} className="mt-6 space-y-5">
+        <form
+          onSubmit={handleSubmit}
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5 [scrollbar-gutter:stable]">
           <div className="space-y-1.5">
             <Label htmlFor="r-name">
               规则名<span className="ml-0.5 text-danger">*</span>
@@ -849,7 +962,7 @@ function RuleSheet({ open, onOpenChange, rule }: RuleSheetProps) {
                 <SelectTrigger className="h-10">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="max-h-[280px]">
                   <SelectItem value="global">全局</SelectItem>
                   <SelectItem value="script">脚本</SelectItem>
                   <SelectItem value="instance">实例</SelectItem>
@@ -862,7 +975,7 @@ function RuleSheet({ open, onOpenChange, rule }: RuleSheetProps) {
                 <SelectTrigger className="h-10">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="max-h-[280px]">
                   <SelectItem value="any">任意</SelectItem>
                   <SelectItem value="success">成功</SelectItem>
                   <SelectItem value="failure">失败</SelectItem>
@@ -886,7 +999,7 @@ function RuleSheet({ open, onOpenChange, rule }: RuleSheetProps) {
                 <SelectTrigger className="h-10">
                   <SelectValue placeholder="选择脚本" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="max-h-[280px]">
                   {(scripts ?? []).map((s) => (
                     <SelectItem key={s.id} value={String(s.id)}>
                       {s.name}
@@ -916,7 +1029,7 @@ function RuleSheet({ open, onOpenChange, rule }: RuleSheetProps) {
                     }
                   />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="max-h-[280px]">
                   {(instances ?? []).map((i) => (
                     <SelectItem key={i.id} value={String(i.id)}>
                       {i.name}
@@ -938,7 +1051,7 @@ function RuleSheet({ open, onOpenChange, rule }: RuleSheetProps) {
               <SelectTrigger className="h-10">
                 <SelectValue placeholder="选择推送渠道" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="max-h-[280px]">
                 {(channels ?? []).map((c) => (
                   <SelectItem key={c.id} value={String(c.id)}>
                     {c.name} · {c.type}
@@ -961,15 +1074,75 @@ function RuleSheet({ open, onOpenChange, rule }: RuleSheetProps) {
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="r-tpl">自定义模板(可选,Jinja2)</Label>
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor="r-tpl">自定义模板(可选,Jinja2)</Label>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+                onClick={() => setShowFields((s) => !s)}
+                aria-pressed={showFields}
+              >
+                <BookOpen className="size-3.5" strokeWidth={1.75} />
+                字段速查
+              </Button>
+            </div>
+            <Select value={templatePresetId} onValueChange={applyTemplatePreset}>
+              <SelectTrigger className="h-9">
+                <SelectValue placeholder="选预设模板(可选,选中后会覆盖下方内容)" />
+              </SelectTrigger>
+              <SelectContent className="max-h-[280px]">
+                {TEMPLATE_PRESETS.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {currentTemplatePreset ? (
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                {currentTemplatePreset.description}
+              </p>
+            ) : null}
             <Textarea
+              ref={templateRef}
               id="r-tpl"
               value={template}
               onChange={(e) => setTemplate(e.target.value)}
-              rows={4}
-              placeholder="留空使用默认模板"
+              rows={8}
+              placeholder="留空使用默认模板;或从上方下拉选预设,再按需调整"
               className="font-mono text-xs"
             />
+            <p className="text-[11px] text-muted-foreground">{TEMPLATE_FORMAT_NOTE}</p>
+
+            {showFields ? (
+              <Card className="mt-2 space-y-2.5 bg-muted/40 p-3">
+                <p className="text-[11px] text-muted-foreground">
+                  点击下方任意字段即可插入到模板光标位置。
+                </p>
+                {TEMPLATE_FIELD_GROUPS.map((group) => (
+                  <div key={group.label} className="space-y-1">
+                    <div className="text-[11px] font-medium text-foreground">
+                      {group.label}
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {group.fields.map((f) => (
+                        <button
+                          type="button"
+                          key={f.name}
+                          onClick={() => insertField(f.name)}
+                          title={f.note ?? f.name}
+                          className="rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10.5px] text-foreground hover:bg-accent hover:text-accent-foreground"
+                        >
+                          {f.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </Card>
+            ) : null}
           </div>
 
           <div className="flex items-center gap-3">
@@ -979,7 +1152,9 @@ function RuleSheet({ open, onOpenChange, rule }: RuleSheetProps) {
             </Label>
           </div>
 
-          <SheetFooter className="flex flex-row-reverse gap-2 pt-2">
+          </div>
+
+          <SheetFooter className="flex shrink-0 flex-row-reverse gap-2 border-t border-border bg-background px-6 py-4">
             <Button type="submit" disabled={submitting}>
               {submitting ? (
                 <Loader2 className="mr-1.5 size-4 animate-spin" strokeWidth={1.75} />

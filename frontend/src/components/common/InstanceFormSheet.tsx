@@ -19,6 +19,7 @@
  *   - 关闭:无 dirty 直接关;有 dirty 弹 confirm(简化:暂用 confirm 原生)
  */
 import { useEffect, useMemo, useState } from 'react';
+import { useNodes } from '@/api/hooks/nodes';
 
 import {
   Sheet,
@@ -60,6 +61,8 @@ interface MetaFields {
   timeout_sec?: string;
   max_retries?: string;
   retry_interval_sec?: string;
+  /** MVP-1:节点 ID(form 用 string 方便 Select,提交时转 number) */
+  node_id?: string;
 }
 
 export function InstanceFormSheet({
@@ -93,6 +96,7 @@ export function InstanceFormSheet({
         instance?.retry_interval_sec !== undefined
           ? String(instance.retry_interval_sec)
           : '60',
+      node_id: String(instance?.node_id ?? 1),
     }),
     [instance, script.default_cron, script.default_timeout_sec],
   );
@@ -116,6 +120,8 @@ export function InstanceFormSheet({
       ? Number(meta.retry_interval_sec)
       : 60;
 
+    const nodeIdNum = meta.node_id ? Number(meta.node_id) : 1;
+
     if (isEdit && instance) {
       const payload: InstanceUpdatePayload = {
         name: meta.name,
@@ -125,6 +131,7 @@ export function InstanceFormSheet({
         max_retries: Number.isFinite(maxRetriesNum) ? maxRetriesNum : 0,
         retry_interval_sec: Number.isFinite(retryIntervalNum) ? retryIntervalNum : 60,
         config,
+        node_id: Number.isFinite(nodeIdNum) ? nodeIdNum : 1,
       };
       await update.mutateAsync({ id: instance.id, payload, scriptSlug: script.slug });
     } else {
@@ -137,6 +144,7 @@ export function InstanceFormSheet({
         max_retries: Number.isFinite(maxRetriesNum) ? maxRetriesNum : 0,
         retry_interval_sec: Number.isFinite(retryIntervalNum) ? retryIntervalNum : 60,
         config,
+        node_id: Number.isFinite(nodeIdNum) ? nodeIdNum : 1,
       };
       await create.mutateAsync(payload);
     }
@@ -210,6 +218,10 @@ export function InstanceFormSheet({
                     placeholder={script.default_cron ?? '例如 0 9 * * *'}
                   />
                 </div>
+                <NodeSelect
+                  value={meta.node_id ?? '1'}
+                  onChange={(v) => patchMeta({ node_id: v })}
+                />
                 <div className="grid grid-cols-3 gap-3">
                   <div className="space-y-1.5">
                     <Label htmlFor="meta-timeout">超时(秒)</Label>
@@ -264,6 +276,51 @@ export function InstanceFormSheet({
         </div>
       </SheetContent>
     </Sheet>
+  );
+}
+
+/** ============ 节点选择 ============
+ * MVP-1:从 /api/v1/nodes 拉列表,只显 enabled 节点
+ * 默认 1 = local;选远程节点意味着实例 run 派发到该节点
+ */
+function NodeSelect({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const { data, isLoading, isError } = useNodes();
+  const nodes = (data?.items ?? []).filter((n) => n.enabled);
+
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor="meta-node">执行节点</Label>
+      <select
+        id="meta-node"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+        disabled={isLoading}
+      >
+        {isLoading && <option value="1">加载节点中…</option>}
+        {!isLoading &&
+          nodes.map((n) => (
+            <option key={n.id} value={String(n.id)}>
+              {n.is_local
+                ? `${n.name || n.slug} (本地)`
+                : `${n.name || n.slug} ${n.online ? '· 在线' : '· 离线'}`}
+            </option>
+          ))}
+        {!isLoading && nodes.length === 0 && <option value="1">local</option>}
+      </select>
+      {isError && (
+        <p className="text-xs text-danger">节点列表加载失败,默认走 local</p>
+      )}
+      <p className="text-xs text-muted-foreground">
+        本地节点(local)= 主面板自身,无 Chrome 等 selenium 环境;远程节点(如 vps-jm)需在 /nodes 页注册 + 部署 agent。
+      </p>
+    </div>
   );
 }
 

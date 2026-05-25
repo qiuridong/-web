@@ -33,6 +33,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 if TYPE_CHECKING:
+    from app.db.models.node import Node
     from app.db.models.run import Run
     from app.db.models.script import Script
 
@@ -45,6 +46,7 @@ class Instance(Base):
       调 `app.core.crypto` 处理
     - `last_run_*` 三个冗余字段在每次 run 结束后由调度器同步,避免列表页 N+1 join
     - 删除 instance 时级联删除其所有 runs
+    - `node_id` (MVP-1):指定此实例在哪个节点执行;默认 1 = local(主面板自己)
     """
 
     __tablename__ = "instances"
@@ -57,6 +59,16 @@ class Instance(Base):
         Integer,
         ForeignKey("scripts.id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
+    )
+    # MVP-1 远程 agent:node_id 默认 1(local 节点)
+    # ondelete=RESTRICT 太强(SQLite 不支持);用 SET NULL 后 service 层校验删 node 前先检查
+    node_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("nodes.id", ondelete="SET NULL"),
+        nullable=True,
+        default=1,
+        server_default="1",
         index=True,
     )
     name: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -115,6 +127,12 @@ class Instance(Base):
 
     # ===== 关系 =====
     script: Mapped[Script] = relationship("Script", back_populates="instances")
+    # MVP-1:与 Node 关联,foreign_keys 显式指定避免 SQLAlchemy 报歧义
+    node: Mapped[Node | None] = relationship(
+        "Node",
+        back_populates="instances",
+        foreign_keys=[node_id],
+    )
     runs: Mapped[list[Run]] = relationship(
         "Run",
         back_populates="instance",

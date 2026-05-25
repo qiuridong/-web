@@ -145,6 +145,7 @@ def _serialize_instance_for_detail(
         "name": instance.name,
         "description": instance.description,
         "script": {"slug": script.slug, "name": script.name},
+        "node_id": instance.node_id,  # MVP-1:让 frontend 编辑实例时知道当前节点
         "cron_expr": instance.cron_expr,
         "timeout_sec": instance.timeout_sec,
         "enabled": instance.enabled,
@@ -173,6 +174,7 @@ def _serialize_instance_for_list(
         "name": instance.name,
         "description": instance.description,
         "script": {"slug": script.slug, "name": script.name},
+        "node_id": instance.node_id,  # MVP-1:列表也带 node_id 方便前端展示节点列
         "cron_expr": instance.cron_expr,
         "timeout_sec": instance.timeout_sec,
         "enabled": instance.enabled,
@@ -278,6 +280,23 @@ def create_instance(
     config_blob = cipher.encrypt_dict(cleaned_config) if cleaned_config else ""
 
     # 5. 落库
+    # MVP-1:校验 node_id 存在 + enabled(若指定)
+    requested_node_id = getattr(payload, "node_id", None) or 1
+    if requested_node_id != 1:
+        from app.db.models.node import Node  # noqa: PLC0415
+
+        node = db.get(Node, requested_node_id)
+        if node is None:
+            raise ValidationError(
+                f"node_id={requested_node_id} 不存在",
+                details={"node_id": requested_node_id},
+            )
+        if not node.enabled:
+            raise ValidationError(
+                f"node {node.slug!r} 已禁用,不能绑定新实例",
+                details={"node_id": requested_node_id, "node_slug": node.slug},
+            )
+
     instance = Instance(
         script_id=script.id,
         name=payload.name,
@@ -289,6 +308,7 @@ def create_instance(
         retry_interval_sec=payload.retry_interval_sec,
         config_blob=config_blob,
         config_version=1,
+        node_id=requested_node_id,
     )
     db.add(instance)
     db.flush()
@@ -566,7 +586,8 @@ def trigger_instance(
     1. 校验实例存在 + 未禁用
     2. 在 DB 内先创建 pending run(让前端立刻拿到 run_id)
     3. 提交事务
-    4. 用 ``scheduler.trigger_now(..., pre_created_run_id=...)`` 异步启执行
+    4. **本地节点**(node_id is None / 1):用 ``scheduler.trigger_now(...)`` 异步启 sandbox
+    5. **远程节点**(MVP-1):标 host=node:<slug> + 提交,等 agent poll 拉走
     """
     instance = _get_instance_or_404(db, instance_id)
     script = db.get(Script, instance.script_id)
@@ -575,6 +596,23 @@ def trigger_instance(
             f"实例 {instance_id} 关联脚本不存在",
             details={"instance_id": instance_id},
         )
+
+    # MVP-1 早分流:检查 node_id 决定走本地 / 远程
+    is_remote = instance.node_id is not None and instance.node_id != 1
+    remote_node_slug: str | None = None
+    if is_remote:
+        from app.db.models.node import Node  # noqa: PLC0415
+
+        node = db.get(Node, instance.node_id)
+        if node is None or node.is_local:
+            is_remote = False
+        elif not node.enabled:
+            raise ValidationError(
+                f"实例 {instance_id} 所在节点 {node.slug!r} 已禁用",
+                details={"instance_id": instance_id, "node_slug": node.slug},
+            )
+        else:
+            remote_node_slug = node.slug
 
     now = _utcnow()
     run = Run(
@@ -585,6 +623,9 @@ def trigger_instance(
         status="pending",
         started_at=now,
     )
+    if is_remote and remote_node_slug:
+        # 标记 host = node:<slug>,agent poll 时按这个匹配
+        run.host = f"node:{remote_node_slug}"[:64]
     db.add(run)
     db.flush()
     db.refresh(run)
@@ -593,7 +634,18 @@ def trigger_instance(
     # 提交事务,确保子任务能查到 run
     db.commit()
 
-    # 异步启动执行(fire-and-forget)
+    # 远程节点:不调 trigger_now,DB 已经标 pending + host,等 agent poll 拉走
+    if is_remote:
+        logger.info(
+            "已派发(远程)instance.{} trigger={} run_id={} node={}",
+            instance_id,
+            trigger_type,
+            run_id,
+            remote_node_slug,
+        )
+        return run_id
+
+    # 本地节点:异步启动执行(fire-and-forget)
     try:
         scheduler.trigger_now(
             instance_id,
@@ -606,7 +658,7 @@ def trigger_instance(
         raise
 
     logger.info(
-        "已触发 instance.{} trigger={} run_id={}",
+        "已触发(本地)instance.{} trigger={} run_id={}",
         instance_id,
         trigger_type,
         run_id,

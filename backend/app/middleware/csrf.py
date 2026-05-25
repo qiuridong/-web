@@ -24,12 +24,14 @@ from starlette.responses import JSONResponse
 # 安全方法不需校验
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
-# 完全跳过 CSRF 校验的路径前缀(健康检查 / 文档 / OpenAPI 等)
+# 完全跳过 CSRF 校验的路径前缀(健康检查 / 文档 / OpenAPI / agent API)
+# - /api/v1/agent/* 走 Bearer token 鉴权(无浏览器 cookie 风险),CSRF 不适用
 _EXEMPT_PREFIXES: tuple[str, ...] = (
     "/health",
     "/docs",
     "/redoc",
     "/openapi.json",
+    "/api/v1/agent/",  # MVP-1:agent 端 API 走 Bearer auth,豁免 CSRF
 )
 
 

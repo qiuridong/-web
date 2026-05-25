@@ -297,6 +297,21 @@ def main() -> int:
     slug = str(ctx_raw.get("script_slug") or slug_fallback)
     logger = _build_logger(slug)
 
+    # ===== 平台级 UX:用户立即运行(manual)→ 强制跳过所有脚本的 random_delay_sec =====
+    # "立即"就该立即,不被脚本作者的延迟设计影响。
+    # 这是平台契约层的统一行为(所有脚本受益),避免每个脚本作者都要自己处理 trigger_type。
+    # cron / scheduler 触发(trigger_type != 'manual')仍走脚本配置的 random_delay_sec
+    # (scheduled 错峰避风控合理)。
+    trigger_type = str(ctx_raw.get("trigger_type") or "")
+    if trigger_type == "manual" and isinstance(config, dict) and "random_delay_sec" in config:
+        original_delay = config.get("random_delay_sec")
+        if original_delay and int(original_delay or 0) > 0:
+            config = {**config, "random_delay_sec": 0}
+            logger.info(
+                f"平台 UX:trigger_type=manual,强制 random_delay_sec=0 "
+                f"(原配置 {original_delay}s,立即运行不等延迟)"
+            )
+
     # ===== 2. 切 cwd 到 script_dir 并加载 main =====
     script_dir_str = str(ctx_raw.get("script_dir") or "")
     if not script_dir_str:

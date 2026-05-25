@@ -1,0 +1,117 @@
+slug: jmcomic
+name: 禁漫天堂(JMComic)每日签到
+description: |
+  https://18comic.vip 每日签到 — **selenium + 账密版**(v1.0.0)。
+
+  ## 工作原理
+  1. Xvfb 虚拟屏 + Chrome UC 模式过 Cloudflare Turnstile,拿 cf_clearance
+  2. requests 注入 cookie → POST /login(账密)→ POST /ajax/user_daily_sign
+  3. sign 接口异常时兜底:GET 首页扫 8 个繁简体"已簽到"marker 确认状态
+  4. 失败时按异常类型重试 max_retries 次(默认 3,30s 间隔)
+
+  ## 资源占用(运行时)
+  - 内存:~1.5 GB 峰值(Chrome)
+  - 单次耗时:60-120 秒(等 CF 15s + UC 点击 6s × 1-5 次 + login/sign 各 < 1s)
+  - 首次部署:额外 ~30 秒装依赖(apt + pip + Chrome ~150 MB 下载)
+
+  ## 部署节点要求(⚠️ 重要)
+  - **Linux 节点 + root/sudo 权限**(自动装 xvfb / Chrome / chromedriver)
+  - 磁盘 ≥ 500 MB / 内存 ≥ 1.5 GB / Python 3.10+
+  - **不能在主面板 Docker 容器里跑**(没 Chrome 环境)
+  - 需要 MVP-1 远程 agent 派发到 host Linux 节点(如 VPS-JM `38.55.132.186`,原脚本节点)
+  - 验证过 100% 工作的节点:VPS-JM(2026-04-18 ~ 2026-05-22 共 33 天 / 33 次 CF 全过 ✅)
+
+  ## 失效信号 → 处理
+  - `登录失败 status=2 errors=无效的用户名和/或密码` → 重置 JM 密码,实例配置更新
+  - `sign 接口空响应 ... 疑似 server 反爬静默拒绝` → 兜底首页 marker 会自动 fallback;若兜底也认未签,等 24h 再试(IP 信任分恢复)
+  - `经过 5 次重试仍未获取到 cf_clearance` → IP 信任分耗尽 / CF 升级,**等 24h 后会自动恢复**;若多日不行,换节点 IP
+  - 截图存 data_dir/cf_error_<ts>.jpg(详情页可查)
+
+  ## 与 host 原脚本协同
+  - host VPS-JM `/root/JMComic-Auto_Sign_in/` 是历史版本(无平台协议适配)
+  - 本实例上线后,**强烈建议停掉 host crontab 避免双调用消耗 IP 信任分**
+
+version: 1.1.0
+author: yunkelai (基于 host 4-5 月 33 次验证版本改造 + 5-24 v1.0 首跑成功)
+homepage: https://18comic.vip
+
+default_cron: "0 1 * * *"      # UTC 01:00 = 北京 09:00 + random_delay 0~3600s = 09:00-10:00 窗口
+default_timeout_sec: 6000       # 60min 随机延迟 + 3min 首次CF/login + 2 × 5min 重试间隔 + 2min 余量
+icon: icon.svg
+
+fields:
+  - key: username
+    label: JM 用户名
+    type: string
+    required: true
+    description: |
+      18comic.vip 的登录用户名(纯数字 / 字母均可)。
+    placeholder: "your-jm-username"
+
+  - key: password
+    label: JM 密码
+    type: secret
+    required: true
+    description: |
+      18comic.vip 的登录密码。
+      自动 Fernet 加密落库,前端再不可见,sandbox 解密成明文跑完即销毁。
+      ⚠️ 强烈建议:JM 账号开 2FA(若支持),并使用与日常账号不同的密码。
+    placeholder: "your-jm-password"
+
+  - key: random_delay_sec
+    label: 随机延迟(秒)
+    type: integer
+    default: 3600
+    min: 0
+    max: 7200
+    description: |
+      启动后随机 sleep 0~N 秒再签到。默认 3600 = 1 小时;
+      配合 cron `0 1 * * *`(UTC)= 签到时刻落在北京时间 **09:00~10:00 之间**(避开整点风控)。
+      设 0 = 立即(调试用);设 7200 = 2 小时窗口。
+      ⚠️ **实例 timeout 必须 ≥ 本字段 + 180 秒**(留 selenium 跑 Chrome 时间),
+      否则会被 SIGTERM 强杀。本脚本默认 timeout 4500s 已留足。
+
+  - key: max_retries
+    label: 最大重试次数
+    type: integer
+    default: 3
+    min: 1
+    max: 5
+    description: |
+      签到过程中遇到 sign 接口异常 / 网络错误时,自动重试次数。
+      默认 3 次。**v1.1.0 起重试复用 cookies/session,不重启 Chrome 过 CF**,节省 IP 信任分。
+      **账号密码错时不重试**(无意义)。
+
+  - key: retry_interval_sec
+    label: 重试间隔(秒)
+    type: integer
+    default: 300
+    min: 60
+    max: 1800
+    description: |
+      签到失败后等多久重试。默认 300 = **5 分钟**。
+      重试期间**复用第一次过 CF 拿到的 cookies + session**(不再启 Chrome,不再 login)。
+      3 次重试 × 5 分钟 = 总耗 15 分钟,完全在 cf_clearance 有效期内。
+      仅当 sign 接口返"未登录"(server session 失效)时才会主动重过 CF。
+
+  - key: cf_clearance_ttl_sec
+    label: CF cookies 预估有效期(秒)
+    type: integer
+    default: 1800
+    min: 600
+    max: 7200
+    description: |
+      cf_clearance cookies 在 server 端的预估有效期。默认 1800 = **30 分钟**(保守)。
+      超过此时间还在重试时,会**主动**重新过 CF + login(浏览器再起一次)。
+      实际 cf_clearance 可能更长(几小时),这里保守取 30 分钟避免静默失效。
+      如果一次签到很慢(延迟 + 多次重试)超过 30 分钟,会重过 CF;否则单次只过 1 次 CF。
+
+runtime:
+  python_version: ">=3.10"
+  isolated: true
+  env_passthrough:
+    - HTTP_PROXY
+    - HTTPS_PROXY
+    - NO_PROXY
+    - DISPLAY
+  dependencies_file: requirements.txt

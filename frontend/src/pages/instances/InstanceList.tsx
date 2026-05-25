@@ -84,6 +84,11 @@ import { cn } from '@/lib/utils';
 type EnabledFilter = 'all' | 'enabled' | 'disabled' | 'paused';
 
 function instanceStatusToBadge(s?: string | null): Status {
+  // 区分:实例从未运行(null/undefined)→ 'never_run' "待运行"
+  //       后端返了未识别字符串 → 'unknown' "未知"
+  if (s === null || s === undefined || s === '') {
+    return 'never_run';
+  }
   switch (s) {
     case 'success':
       return 'success';

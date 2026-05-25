@@ -29,6 +29,7 @@ import { Dashboard } from '@/pages/dashboard/Dashboard';
 import { ScriptList } from '@/pages/scripts/ScriptList';
 import { ScriptDetail } from '@/pages/scripts/ScriptDetail';
 import { InstanceList } from '@/pages/instances/InstanceList';
+import { NodeList } from '@/pages/nodes/NodeList';
 import { RunList } from '@/pages/runs/RunList';
 import { NotificationHub } from '@/pages/notifications/NotificationHub';
 import { Settings } from '@/pages/settings/Settings';
@@ -67,6 +68,7 @@ export const router = createBrowserRouter([
         element: <Placeholder title="Instance Detail" />,
       },
       { path: 'instances', element: <InstanceList /> },
+      { path: 'nodes', element: <NodeList /> },
       { path: 'runs', element: <RunList /> },
       { path: 'runs/:id', element: <RunList /> },
       {

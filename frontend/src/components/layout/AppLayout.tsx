@@ -36,6 +36,7 @@ import {
   Monitor,
   Search,
   ChevronsUpDown,
+  Server,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { toast } from 'sonner';
@@ -186,6 +187,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: '仪表盘', to: '/dashboard', icon: LayoutDashboard },
   { label: '脚本', to: '/scripts', icon: ScrollText },
   { label: '执行', to: '/runs', icon: Activity },
+  { label: '节点', to: '/nodes', icon: Server },
   { label: '通知', to: '/notifications', icon: Bell },
   { label: '设置', to: '/settings', icon: Settings },
 ];

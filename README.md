@@ -4,15 +4,57 @@
 >
 > **个人 / 小团队自用**,Ubuntu 24 + Docker Compose 单机部署。
 
-## ✨ 特性
+## 🆚 vs 青龙面板(为什么不是再造一个青龙)
 
-- 🧩 **插件化脚本**:扔目录就识别,无需改主程序代码
-- ⏰ **可视化 cron 调度**:每脚本独立时间,支持多实例多账号
-- 🎨 **现代 UI**:React 18 + shadcn/ui + Tailwind v4,深浅模式一等公民
-- 🔒 **配置加密**:cookie / token 等敏感字段 Fernet 加密落库
-- 🔔 **通知集成**:apprise 一库覆盖 Telegram / 钉钉 / 飞书 / Server酱 / 企微 等 80+ 渠道
+> **"青龙是仓库,签到管家是精装公寓"**
+> 青龙优先**生态广度**(任意脚本能跑、社区共享),签到管家优先**架构深度**(强契约 / 字段加密 / 沙箱隔离 / 结构化诊断 / 业务弹性)。
+
+| 维度 | 青龙面板 | **签到管家** |
+|---|---|---|
+| **每脚本配置** | 全局 env 表 + 手动关联 | **manifest fields → 自动生成 UI 表单**(11 种字段类型) |
+| **字段加密** | env plaintext | **Fernet 字段级 + 主密钥 600 权限** |
+| **子进程沙箱** | 容器内直跑 | **独立 sandbox_runner + 进程组 killpg + sys.path 隔离防 import app.*** |
+| **失败诊断** | stderr 自己看 | **结构化 RunResult.data**(category/error_class/endpoint/body_preview/status_code) |
+| **业务弹性** | 基本无 | **重试 + session 复用 + cookies TTL 自管理 + 业务 marker 兜底** |
+| **多节点(MVP-1)** | 单机为主 | **Pull Agent + Long Polling**(类 GitHub Actions self-hosted runner) |
+| **UI** | 2020-2022 风 | **shadcn + Tailwind v4 + OKLCH 配色 + 深浅色 + ⌘K 命令面板** |
+| **通知** | 9 种内置 | **apprise 80+ 渠道** |
+| **学习曲线** | 全局 env 找半天 | **复制现有 manifest.yaml 改 30 分钟一个新脚本** |
+| 适合谁 | 想要现成脚本社区生态 | **个人/小团队、在意 UI + 安全、愿意自己写脚本** |
+
+## ✨ 核心特性
+
+- 🧩 **插件化脚本**:扔目录就识别(扫描即入库),无需改主程序代码
+- 📋 **强契约 manifest**:**11 字段类型**(string/secret/integer/boolean/select/multiselect/multiline/cron/url/json/file)→ **UI 表单 + 后端校验自动生成**
+- ⏰ **可视化 cron 调度**:每脚本独立时间(cron 实时人话翻译 + 未来 5 次执行预览),支持多实例多账号
+- 🎨 **现代 UI**:React 18 + shadcn/ui + Tailwind v4,深浅模式一等公民,⌘K 命令面板
+- 🔒 **字段级加密**:`type: secret` 字段 Fernet 加密落库,API 响应自动脱敏,**主密钥永不出主面板**
+- 🧰 **子进程沙箱**:独立 `sandbox_runner.py` + 进程组超时强杀(`killpg SIGTERM→SIGKILL`)+ sys.path 隔离防 `import app.*` 拿密钥
+- 🔔 **通知集成**:apprise **80+ 渠道**(Telegram / 钉钉 / 飞书 / Server酱 / 企微 / Bark / Pushover / SMTP / Discord / ...)
 - 📊 **实时日志**:SSE 推送 + xterm.js 终端体验
-- 🚀 **一键部署**:Caddy 自动 HTTPS,`docker compose up -d` 即可
+- 🛡 **业务弹性**:**重试 + session 复用 + cookies TTL 自管理 + 业务 marker 兜底**(JM v1.1.0 集大成验证)
+- 🌐 **多节点 agent**(MVP-1):Pull Agent + Long Polling(类 GitHub Actions self-hosted runner),签到任务可绑节点跑
+- 📝 **Web 上传脚本**(MVP-5):浏览器拖 zip 上传 + 在线 CodeMirror 编辑 + 自动 dry-run 校验
+- 🔍 **结构化失败诊断**:`RunResult.data` 含完整 endpoint / status / body_preview / elapsed_ms,前端 /runs 5 秒定位 bug
+- 🚀 **一键部署**:Docker Compose + nginx 反代 + Let's Encrypt + systemd 开机自启
+
+## 📦 已内置精装脚本(N=3,覆盖 3 种典型反爬模式)
+
+| Slug | 站点 | 框架 | 反爬强度 | 凭证类型 | 资源占用 |
+|---|---|---|---|---|---|
+| **coklw** | https://coklw.net | WordPress | 弱(CF 灰云) | 单 cookie | < 30 MB / < 5s |
+| **ptfans** | https://ptfans.cc | NexusPHP PT 站 | 中(CF + 业务层) | `c_secure_pass` cookie(1-2 年有效) | < 30 MB / < 5s |
+| **jmcomic** | https://18comic.vip | NexusPHP + Cloudflare Turnstile | **重(JS Challenge + 业务层反爬)** | 用户名 + 密码(SeleniumBase UC + Xvfb 自动过 CF) | ~1.5 GB / 60-120s |
+
+3 个脚本覆盖了从"最简 cookie 站"到"最难 CF Turnstile 站"的全谱系,**验证 manifest 契约对完全不同复杂度的脚本通用**。
+
+## 📚 文档体系
+
+- 📋 [**docs/SCRIPT-FIELDS-REFERENCE.md**](docs/SCRIPT-FIELDS-REFERENCE.md) — **manifest 11 字段类型完整速查 + 真实例 yaml**(写新脚本必看)
+- 📖 [项目说明.md](项目说明.md) — 完整中文项目介绍 + 脚本开发规范
+- 🛠 [scripts/coklw/](scripts/coklw/), [scripts/ptfans/](scripts/ptfans/), [scripts/jmcomic/](scripts/jmcomic/) — 3 个真签到精装范例,直接参考改写
+- 📊 [agent/README.md](agent/README.md) — 远程多节点 agent 部署指南(MVP-1)
+- 📝 [进度/](进度/) — 完整开发档案(README 索引 + 设计稿 + 决策 ADR + 13+ 变更档案)
 
 ## 🏗 技术栈
 
