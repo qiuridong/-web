@@ -17,18 +17,24 @@
  *   - 不再 toast(避免局部错误 + 全局 toast 双 ping)
  *   - 网络层错误 → 同上面板,提示"检查后端是否运行"
  */
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useDropzone } from 'react-dropzone';
+import JSZip from 'jszip';
+import yaml from 'js-yaml';
 import {
   AlertCircle,
+  BookOpen,
   CheckCircle2,
+  Circle,
+  Download,
   Files,
   FolderUp,
   Loader2,
   Package,
   Upload as UploadIcon,
   X,
+  XCircle,
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -51,7 +57,122 @@ import {
   type UploadResponse,
 } from '@/api/hooks/useScriptUpload';
 import { formatBytes } from '@/lib/format';
+import {
+  SCRIPT_REQUIRED_FILES,
+  buildTemplateZip,
+  downloadBlob,
+} from '@/lib/script-template';
 import { cn } from '@/lib/utils';
+
+import { ScriptDevGuideSheet } from './ScriptDevGuideSheet';
+
+// ============ 上传前的文件清单解析 ============
+
+interface ManifestSummary {
+  slug: string;
+  name: string;
+  version: string;
+  fieldCount: number;
+}
+
+interface FileAnalysis {
+  /** 每个 required file 的存在状态(present / missing) */
+  checklist: Record<string, 'present' | 'missing'>;
+  /** manifest.yaml 解析摘要,失败为 null */
+  manifestSummary: ManifestSummary | null;
+  /** yaml 解析错误(若有) */
+  yamlError: string | null;
+  /** 是否检测到 .py 主入口外的额外 .py 文件(纯展示,无校验意义) */
+  extraPyCount: number;
+}
+
+/**
+ * 解析上传的 zip 或文件夹,返回文件清单 + manifest 摘要。
+ *
+ * 处理两种来源:
+ * - 单个 .zip 文件(用 jszip 解压解析)
+ * - 多个 File(folder upload,用 webkitRelativePath)
+ *
+ * 对每个 RequiredFile,以 basename 在最浅深度的位置查找。
+ */
+async function analyzeUpload(files: File[]): Promise<FileAnalysis> {
+  type Entry = { path: string; getText: () => Promise<string> };
+  const entries: Entry[] = [];
+
+  const single = files.length === 1 ? files[0] : undefined;
+  if (single && single.name.toLowerCase().endsWith('.zip')) {
+    const buf = await single.arrayBuffer();
+    const zip = await JSZip.loadAsync(buf);
+    for (const [name, entry] of Object.entries(zip.files)) {
+      if (entry.dir) continue;
+      entries.push({
+        path: name,
+        getText: () => entry.async('text'),
+      });
+    }
+  } else {
+    for (const f of files) {
+      const path =
+        (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name;
+      entries.push({
+        path,
+        getText: () => f.text(),
+      });
+    }
+  }
+
+  // 找 basename 在最浅深度的 entry
+  function findShallowest(basename: string): Entry | null {
+    let best: Entry | null = null;
+    let bestDepth = Number.POSITIVE_INFINITY;
+    for (const e of entries) {
+      const parts = e.path.split(/[/\\]/);
+      const last = parts[parts.length - 1];
+      if (last === basename) {
+        const depth = parts.length - 1;
+        if (depth < bestDepth) {
+          bestDepth = depth;
+          best = e;
+        }
+      }
+    }
+    return best;
+  }
+
+  const checklist: Record<string, 'present' | 'missing'> = {};
+  for (const r of SCRIPT_REQUIRED_FILES) {
+    checklist[r.filename] = findShallowest(r.filename) ? 'present' : 'missing';
+  }
+
+  let manifestSummary: ManifestSummary | null = null;
+  let yamlError: string | null = null;
+  const manifestEntry = findShallowest('manifest.yaml');
+  if (manifestEntry) {
+    try {
+      const text = await manifestEntry.getText();
+      const parsed = yaml.load(text) as Record<string, unknown> | null;
+      if (parsed && typeof parsed === 'object') {
+        manifestSummary = {
+          slug: String(parsed.slug || ''),
+          name: String(parsed.name || ''),
+          version: String(parsed.version || ''),
+          fieldCount: Array.isArray(parsed.fields) ? parsed.fields.length : 0,
+        };
+      } else {
+        yamlError = 'manifest.yaml 顶层必须是 mapping(键值对)';
+      }
+    } catch (e) {
+      yamlError = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  const extraPyCount = entries.filter((e) => {
+    const last = e.path.split(/[/\\]/).pop() ?? '';
+    return last.toLowerCase().endsWith('.py') && last !== 'main.py';
+  }).length;
+
+  return { checklist, manifestSummary, yamlError, extraPyCount };
+}
 
 interface UploadScriptDialogProps {
   open: boolean;
@@ -75,6 +196,17 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
   const [result, setResult] = useState<UploadResponse | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [errorDetail, setErrorDetail] = useState<unknown>(null);
+
+  // 文件清单解析(拖入文件后立即跑)
+  const [analysis, setAnalysis] = useState<FileAnalysis | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analyzeError, setAnalyzeError] = useState<string | null>(null);
+
+  // 开发指南 Sheet
+  const [guideOpen, setGuideOpen] = useState(false);
+
+  // 下载模板 loading
+  const [downloadingTemplate, setDownloadingTemplate] = useState(false);
 
   // 客户端 slug 校验(留空也合法,后端会 fallback 到 manifest.yaml 里的 slug)
   const slugTrim = slug.trim();
@@ -120,6 +252,57 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
     [files],
   );
 
+  // files 变化 → 立即跑分析(异步)
+  useEffect(() => {
+    if (files.length === 0) {
+      setAnalysis(null);
+      setAnalyzeError(null);
+      return;
+    }
+    let cancelled = false;
+    setAnalyzing(true);
+    setAnalyzeError(null);
+    analyzeUpload(files)
+      .then((res) => {
+        if (!cancelled) setAnalysis(res);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setAnalysis(null);
+          setAnalyzeError(err instanceof Error ? err.message : String(err));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setAnalyzing(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [files]);
+
+  // 校验:必填文件是否齐全
+  const missingRequired = useMemo(() => {
+    if (!analysis) return [];
+    return SCRIPT_REQUIRED_FILES.filter(
+      (f) => f.required && analysis.checklist[f.filename] !== 'present',
+    );
+  }, [analysis]);
+
+  // 下载模板 zip
+  const handleDownloadTemplate = useCallback(async () => {
+    setDownloadingTemplate(true);
+    try {
+      const blob = await buildTemplateZip('my-script-template');
+      downloadBlob(blob, 'my-script-template.zip');
+    } catch (e) {
+      // 极少失败,只 log
+      // eslint-disable-next-line no-console
+      console.error('下载模板失败', e);
+    } finally {
+      setDownloadingTemplate(false);
+    }
+  }, []);
+
   // 重置整个 Dialog 状态(关闭时调用)
   const resetAll = useCallback(() => {
     setFiles([]);
@@ -130,6 +313,9 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
     setResult(null);
     setErrorMsg(null);
     setErrorDetail(null);
+    setAnalysis(null);
+    setAnalyzing(false);
+    setAnalyzeError(null);
     reset();
   }, [reset]);
 
@@ -175,9 +361,16 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
     }
   }, [dryRun, files, force, slugError, slugTrim, upload]);
 
-  const canSubmit = files.length > 0 && !slugError && !isUploading;
+  const canSubmit =
+    files.length > 0 &&
+    !slugError &&
+    !isUploading &&
+    !analyzing &&
+    missingRequired.length === 0 &&
+    !analyzeError;
 
   return (
+    <>
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-xl gap-0 p-0">
         <DialogHeader className="border-b border-border px-6 py-4">
@@ -212,6 +405,38 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
             />
           ) : (
             <>
+              {/* 工具栏:下载模板 + 开发指南 */}
+              <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2">
+                <p className="mr-auto text-[11px] text-muted-foreground">
+                  第一次写脚本?先下载模板项目,改改 manifest + main.py 即可
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 gap-1.5 px-2 text-xs"
+                  onClick={handleDownloadTemplate}
+                  disabled={downloadingTemplate}
+                >
+                  {downloadingTemplate ? (
+                    <Loader2 className="size-3.5 animate-spin" strokeWidth={1.75} />
+                  ) : (
+                    <Download className="size-3.5" strokeWidth={1.75} />
+                  )}
+                  下载模板项目
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 gap-1.5 px-2 text-xs"
+                  onClick={() => setGuideOpen(true)}
+                >
+                  <BookOpen className="size-3.5" strokeWidth={1.75} />
+                  脚本开发指南
+                </Button>
+              </div>
+
               {/* 拖拽区 */}
               <div
                 {...getRootProps()}
@@ -267,6 +492,16 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
                   </Button>
                 </div>
               </div>
+
+              {/* 文件清单分析(拖入后立即解析) */}
+              {files.length > 0 ? (
+                <FileChecklist
+                  analysis={analysis}
+                  analyzing={analyzing}
+                  error={analyzeError}
+                  missingRequired={missingRequired}
+                />
+              ) : null}
 
               {/* 文件预览 */}
               {files.length > 0 ? (
@@ -416,10 +651,147 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
         ) : null}
       </DialogContent>
     </Dialog>
+    <ScriptDevGuideSheet open={guideOpen} onOpenChange={setGuideOpen} />
+    </>
   );
 }
 
 // ============ 子面板 ============
+
+function FileChecklist({
+  analysis,
+  analyzing,
+  error,
+  missingRequired,
+}: {
+  analysis: FileAnalysis | null;
+  analyzing: boolean;
+  error: string | null;
+  missingRequired: { filename: string; hint: string }[];
+}) {
+  if (analyzing) {
+    return (
+      <div className="mb-4 flex items-center gap-2 rounded-md border border-border bg-card/50 px-3 py-2 text-xs text-muted-foreground">
+        <Loader2 className="size-3.5 animate-spin" strokeWidth={1.75} />
+        正在解析文件清单...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="mb-4 rounded-md border border-danger/30 bg-danger/10 p-3 text-xs">
+        <p className="font-medium text-foreground">解析失败</p>
+        <p className="mt-1 text-muted-foreground">{error}</p>
+      </div>
+    );
+  }
+
+  if (!analysis) return null;
+
+  const { checklist, manifestSummary, yamlError, extraPyCount } = analysis;
+
+  return (
+    <div className="mb-4 space-y-3 rounded-md border border-border bg-card/50 p-3">
+      {/* 清单 */}
+      <div>
+        <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+          文件清单({missingRequired.length === 0 ? '✅ 齐全' : `❌ 缺 ${missingRequired.length} 个必填`})
+        </p>
+        <ul className="space-y-1">
+          {SCRIPT_REQUIRED_FILES.map((r) => {
+            const present = checklist[r.filename] === 'present';
+            const Icon = present
+              ? CheckCircle2
+              : r.required
+                ? XCircle
+                : Circle;
+            const color = present
+              ? 'text-success'
+              : r.required
+                ? 'text-danger'
+                : 'text-muted-foreground/40';
+            return (
+              <li
+                key={r.filename}
+                className="flex items-start gap-2 text-[11.5px]"
+              >
+                <Icon className={cn('mt-0.5 size-3.5 shrink-0', color)} strokeWidth={1.75} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-baseline gap-1.5">
+                    <code
+                      className={cn(
+                        'font-mono text-[11.5px]',
+                        present
+                          ? 'text-foreground'
+                          : r.required
+                            ? 'text-danger'
+                            : 'text-muted-foreground/70',
+                      )}
+                    >
+                      {r.filename}
+                    </code>
+                    <span className="text-[10.5px] text-muted-foreground/80">
+                      {r.required ? '必填' : '可选'}
+                    </span>
+                  </div>
+                  <p className="text-[10.5px] text-muted-foreground/80">
+                    {r.hint}
+                  </p>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+        {extraPyCount > 0 ? (
+          <p className="mt-2 text-[10.5px] text-muted-foreground">
+            另检测到 {extraPyCount} 个其他 .py 文件(模块拆分,无需操作)
+          </p>
+        ) : null}
+      </div>
+
+      {/* manifest 摘要 / yaml 错误 */}
+      {manifestSummary ? (
+        <div className="rounded-md border border-success/20 bg-success/5 px-2.5 py-2 text-[11px]">
+          <p className="mb-1 font-semibold text-success">manifest.yaml 解析成功</p>
+          <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-muted-foreground">
+            <span>slug</span>
+            <code className="font-mono text-foreground">{manifestSummary.slug || '(空)'}</code>
+            <span>name</span>
+            <span className="truncate text-foreground">{manifestSummary.name || '(空)'}</span>
+            <span>version</span>
+            <code className="font-mono text-foreground">{manifestSummary.version || '(空)'}</code>
+            <span>fields</span>
+            <span className="text-foreground">{manifestSummary.fieldCount} 个配置项</span>
+          </div>
+        </div>
+      ) : yamlError ? (
+        <div className="rounded-md border border-danger/30 bg-danger/10 px-2.5 py-2 text-[11px]">
+          <p className="mb-1 font-semibold text-danger">manifest.yaml 解析失败</p>
+          <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[10.5px] text-muted-foreground">
+            {yamlError}
+          </pre>
+        </div>
+      ) : null}
+
+      {/* 必填提示 */}
+      {missingRequired.length > 0 ? (
+        <div className="rounded-md border border-danger/30 bg-danger/10 px-2.5 py-2 text-[11px]">
+          <p className="font-semibold text-danger">
+            缺 {missingRequired.length} 个必填文件,请先补齐再上传:
+          </p>
+          <ul className="mt-1 space-y-0.5">
+            {missingRequired.map((f) => (
+              <li key={f.filename} className="text-muted-foreground">
+                <code className="font-mono text-foreground">{f.filename}</code> · {f.hint}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function SuccessPanel({
   result,
