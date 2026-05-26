@@ -49,6 +49,8 @@ docker compose logs -f backend      # 看日志
 
 ## 当前状态
 
+**2026-05-26 · PR #1 已 merged + 进度文档 PR #2 开** — 用户 review + merge [PR #1](https://github.com/qiuridong/-web/pull/1) 到 main(commit `604404f`);本会话切回 main + fast-forward + 开 docs 分支 `docs/2026-05-25-progress-after-pr1` 把昨晚未提交的进度文档化为 [PR #2](https://github.com/qiuridong/-web/pull/2)(纯文档,本规范 5-25 凌晨刚立的 PR review 流程的体现 — auto mode 也拦了直接 main commit)。**今天等用户拍板下一步**:(A)实施昨晚设计稿的"脚本同步 Pull 方案 + 上传时选节点"(~4-6h);(B)先做轻量验证(5-25 09:00 cron 真测 + 上传 UX 真测 + 通知中心 QQ 邮箱真发,需用户授权读生产 DB);(C)其它。
+
 **2026-05-25 凌晨更晚 · 📦 脚本上传 UX 增强上线 + 首个 PR #1** — (1)新建 `frontend/src/lib/script-template.ts`(~245 行,4 模板 + buildTemplateZip 前端动态生成 zip + SCRIPT_REQUIRED_FILES 清单)+ `ScriptDevGuideSheet.tsx`(~290 行,9 章节完整开发协议右侧 Sheet);(2)`UploadScriptDialog.tsx` 大改造(+280 行):拖入后 `analyzeUpload` 用 jszip+js-yaml 解析,5 项 checklist(✅/❌/⚪)缺必填**禁用上传**,manifest 摘要绿框 / yaml 错误红框,顶部加"📥 下载模板项目"(前端 jszip 动态生成 zip + a.download)+"📖 脚本开发指南"(开右侧 Sheet);(3)装 jszip(主 bundle +27 KB,vendor-misc +98 KB);(4)线上 hash **`index-Cn-vxQI_.js`**;(5)**仓库自 5-17 推 GitHub 以来第一个 PR** — [#1 feat/script-upload-ux-enhancement → main](https://github.com/qiuridong/-web/pull/1),commit `9eabeb9`,等用户 review + merge。节点选择 + Pull 同步留明天做(用户指示"先做 ui 吧,剩下的明天再说")。详见 [变更/2026-05-25-脚本上传UX增强+PR1.md](变更/2026-05-25-脚本上传UX增强+PR1.md)。
 
 **2026-05-25 凌晨 · 🎨 通知中心 UI 三轮增强上线 + 脚本同步 Pull 方案设计稿(未实施)** — (1)新建 `frontend/src/lib/notification-presets.ts`(13 个 apprise 渠道 URL 预设 / 5 个 Jinja2 模板预设 / 5 组字段速查变量);(2)`NotificationHub.tsx` 改造:ChannelSheet 加渠道类型预设下拉(选 QQ 邮箱/Telegram 等自动填 URL 模板 + helper 文案告诉授权码哪里拿),RuleSheet 加模板预设下拉 + 字段速查折叠区(点击 `{{ run.status }}` 等字段插入到光标位置);(3)修 Sheet 内容溢出遮挡保存按钮 — header/scroll/footer 三段式 + `min-h-0` + `scrollbar-gutter:stable`;(4)修 Select 长下拉打开向下展开遮挡其它字段 — 全部 7 个 `<SelectContent>` 加 `max-h-[280px]`;**4 轮 frontend dist 部署**最终线上 hash **`index-DCgPEn8u.js`**(备份 `dist.backup.20260524-130207/131639/132641/133331/`)。**未实施 · 脚本同步 Pull 方案设计稿**:用户问"zip 脚本部署到指定 VPS 似乎没这功能",grep 确认 agent 现状靠**手动 scp**(`agent/README.md` 明写),设计 backend +2 endpoint(GET `/agent/scripts/<slug>/manifest` + `/bundle.zip`)+ agent `_ensure_script_synced` ~80 行(比对 hash → 拉 zip → 原子解压 → 写 marker),触发时机在 `_execute_task()` sandbox_runner 前,工作量约 200 行 / 45-60min,**等用户拍板**(推荐明早 09:00 cron 验证 OK 后做,今晚动 agent 会模糊明早 cron 失败的根因)。详见 [变更/2026-05-25-通知UI增强+脚本同步Pull方案设计.md](变更/2026-05-25-通知UI增强+脚本同步Pull方案设计.md)。
@@ -243,7 +245,7 @@ docker compose logs -f backend      # 看日志
 |---|---|
 | **5-25 09:00-10:00 北京 jmcomic agent cron 真测** | ⏸ **P0** — 今晚 host crontab 已停 + agent 部署到 VPS-JM(节点 `vps-us8-8-jm`)+ 实例 cron `0 1 * * *`(UTC)+ random_delay 0-3600s。验证项:走 random_delay(非 manual)/ CF 一次过(IP 信任分恢复)/ POST /sign HTTP 200 / **真 JCoin/EXP 到账**。结果决定:✅ → 整链路 production-ready / ❌ → 看具体失败模式调整 |
 | **脚本同步 Pull 方案是否实施 + 上传时选节点** | ⏸ 用户决策"先做 ui 吧,剩下的明天再说" → 上传 UX 纯 UI 部分已上线 PR #1;**节点选择 + Pull 同步留明天**(~4-6h 含上传时选节点 + 立即推送同步 + agent `_ensure_script_synced`)。设计稿见 [变更/2026-05-25-通知UI增强+脚本同步Pull方案设计.md](变更/2026-05-25-通知UI增强+脚本同步Pull方案设计.md) § 2 |
-| **PR #1 review + merge** | ⏸ 仓库首个 PR(之前都直接 push main),等用户 review 后 merge:[#1](https://github.com/qiuridong/-web/pull/1) |
+| ✅ ~~PR #1 review + merge~~ | **已完成**(commit `604404f`)。进度文档化为 [PR #2](https://github.com/qiuridong/-web/pull/2) |
 | **通知中心真测** | 用户已建 QQ 邮箱渠道,Ctrl+F5 拿新 dist `index-DCgPEn8u.js` 后用预设填好 → 点测试发送看是否真收到邮件;若失败排查 apprise URL 占位符是否替换干净 |
 | 第一个 demo 签到脚本选什么? | ✅ 已完成 `coklw`(生产真签到走通);下一个候选 bilibili-daily 验证标准通用性 |
 | 域名与 HTTPS 配置 | ✅ 已完成 `jb.aijiaxia.cc` → 154.9.238.144(2026-05-16) |
