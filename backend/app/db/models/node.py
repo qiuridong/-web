@@ -61,6 +61,19 @@ class Node(Base):
     version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # 任意 JSON:IP / region / CPU / memory_mb / os 等
     metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # MVP-2 推送同步:主面板 → agent 的"待办指令" JSON
+    # 格式:{"sync": ["slug1", "slug2"], "delete": ["slug3"]}
+    # 上传时若选了同步节点,把 slug append 到对应 node.pending_actions.sync;
+    # agent poll 时主面板把它带在 response 里;
+    # agent 处理完调 /agent/inventory-report 清空已处理的 entry。
+    pending_actions: Mapped[str] = mapped_column(
+        Text, nullable=False, default="{}", server_default="{}"
+    )
+    # MVP-2 节点脚本管理:agent 报告的本地实际部署情况(单一事实源)
+    # 格式:{"slug": {"sha256": "...", "deployed_at": "ISO 时间"}}
+    deployed_scripts: Mapped[str] = mapped_column(
+        Text, nullable=False, default="{}", server_default="{}"
+    )
     enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="1", index=True
     )
