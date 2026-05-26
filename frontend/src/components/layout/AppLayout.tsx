@@ -21,7 +21,7 @@
  *   - 折叠状态由 useUIStore.sidebarCollapsed 控制,persist 到 localStorage
  *   - 折叠态(64px)只显图标,hover 弹 Tooltip 显示文字
  */
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Outlet, useLocation, useNavigate, NavLink } from 'react-router';
 import {
   LayoutDashboard,
@@ -30,6 +30,7 @@ import {
   Bell,
   Settings,
   LogOut,
+  Menu,
   User as UserIcon,
   Sun,
   Moon,
@@ -51,6 +52,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Sheet, SheetContent } from '@/components/ui/sheet';
 import {
   Tooltip,
   TooltipContent,
@@ -320,18 +322,26 @@ export function AppLayout() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  // 应用外观品牌设置(站点标题 / logo / 背景图)
+  // 应用外观品牌设置(站点标题 / logo / 背景图)— PR #8
   const { data: appearance } = useAppearance();
   const app = appearance ?? DEFAULT_APPEARANCE;
 
-  // document.title 同步(浏览器 tab 显示)
+  // mobile sidebar 抽屉状态(< md 时启用,desktop 始终用 inline grid sidebar)— PR #7
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  // 路由切换时自动关 mobile sidebar(用户点导航后不需要手动关)— PR #7
+  useEffect(() => {
+    setMobileSidebarOpen(false);
+  }, [location.pathname]);
+
+  // document.title 同步(浏览器 tab 显示)— PR #8
   useEffect(() => {
     if (app.site_title) {
       document.title = app.site_title;
     }
   }, [app.site_title]);
 
-  // favicon 自动从 logo 生成(浏览器 tab 图标也跟随品牌)
+  // favicon 自动从 logo 生成(浏览器 tab 图标也跟随品牌)— PR #8
   // logo 图存在 → canvas 缩放成 64×64 PNG
   // 否则 → canvas 画文字 + 主题色背景(从 localStorage palette hex 取,fallback 默认色)
   useEffect(() => {
@@ -474,32 +484,68 @@ export function AppLayout() {
   return (
     <TooltipProvider delayDuration={300}>
       <div
-        className="grid h-screen w-full overflow-hidden bg-background"
-        // CSS Grid 2 列;sidebar 列宽动态,main 列 1fr 自动占剩余 — 任何 viewport 都自动响应
+        className={cn(
+          'flex h-screen w-full overflow-hidden bg-background',
+          // < md: 纯 flex(sidebar 不参与 grid,改 mobile Sheet);
+          // >= md: CSS Grid 2 列(sidebar 列宽动态,main 列 1fr)
+          'md:grid',
+        )}
         style={{
           gridTemplateColumns: `${sidebarWidth}px 1fr`,
           transition: 'grid-template-columns 200ms ease',
         }}
       >
-        <Sidebar
-          collapsed={sidebarCollapsed}
-          onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
-          logoImageUrl={app.logo_image_data_url}
-          logoText={app.sidebar_logo_text}
-          siteTitle={app.site_title}
-          siteSubtitle={app.site_subtitle}
-        />
+        {/* Desktop sidebar — md+ 直接渲染在 grid 第 1 列(PR #7 mobile 抽屉 + PR #8 logo/title props 融合) */}
+        <div className="hidden md:block">
+          <Sidebar
+            collapsed={sidebarCollapsed}
+            onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+            logoImageUrl={app.logo_image_data_url}
+            logoText={app.sidebar_logo_text}
+            siteTitle={app.site_title}
+            siteSubtitle={app.site_subtitle}
+          />
+        </div>
+
+        {/* Mobile sidebar — < md 用 Sheet 抽屉,从左边滑入,backdrop 点击关 */}
+        <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
+          <SheetContent
+            side="left"
+            className="w-[260px] border-r-0 p-0 md:hidden"
+          >
+            {/* mobile 上 sidebar 始终展开态(不折叠),点 logo 关闭抽屉;也接 logo/title props */}
+            <Sidebar
+              collapsed={false}
+              onToggle={() => setMobileSidebarOpen(false)}
+              logoImageUrl={app.logo_image_data_url}
+              logoText={app.sidebar_logo_text}
+              siteTitle={app.site_title}
+              siteSubtitle={app.site_subtitle}
+            />
+          </SheetContent>
+        </Sheet>
 
         {/* 主区(顶栏 + Outlet),纵向 flex 让顶栏 sticky 在自己内部 */}
-        <div className="flex min-w-0 flex-col overflow-hidden">
-          {/* Topbar — 折叠 toggle 已合并到 sidebar 品牌区(点 logo/标题即可),这里去掉重复按钮 */}
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          {/* Topbar — mobile 加汉堡按钮在左,desktop 隐藏(直接显搜索) */}
           <header
             className={cn(
               'sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b border-border',
               'bg-background/70 backdrop-blur-md',
-              'px-4 sm:px-6',
+              'px-3 sm:px-4 lg:px-6',
             )}
           >
+            {/* 汉堡按钮 — 仅 mobile 可见 */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-9 shrink-0 md:hidden"
+              onClick={() => setMobileSidebarOpen(true)}
+              aria-label="打开侧栏"
+            >
+              <Menu size={18} strokeWidth={1.75} />
+            </Button>
+
             {/* 全局搜索 / ⌘K */}
             <button
               type="button"
@@ -513,8 +559,11 @@ export function AppLayout() {
               aria-label="打开命令面板"
               title="⌘K 命令面板"
             >
-              <Search size={14} strokeWidth={1.75} />
-              <span className="flex-1 text-left truncate">搜索 / 跳转 / 命令…</span>
+              <Search size={14} strokeWidth={1.75} className="shrink-0" />
+              <span className="flex-1 truncate text-left">
+                <span className="hidden sm:inline">搜索 / 跳转 / 命令…</span>
+                <span className="sm:hidden">搜索</span>
+              </span>
               <kbd className="hidden rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground sm:inline">
                 ⌘K
               </kbd>
@@ -528,7 +577,8 @@ export function AppLayout() {
 
           {/* 主区滚动容器 — main 自己只负责滚动,
               背景图 + overlay 套在内部 min-h-full 包装(随 scroll content 等高,
-              滚动到底部都能覆盖,不会露出 raw 背景图) */}
+              滚动到底部都能覆盖,不会露出 raw 背景图)— PR #8;
+              内层 outlet 容器用 mobile-first padding(px-3 py-4 sm:px-6 sm:py-6 lg:px-8)— PR #7 融合 */}
           <main className="flex-1 overflow-auto">
             <div
               className="relative min-h-full"
@@ -537,7 +587,7 @@ export function AppLayout() {
               {hasBackground ? (
                 <div style={backgroundOverlayStyle} aria-hidden="true" />
               ) : null}
-              <div className="relative z-[1] mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8">
+              <div className="relative z-[1] mx-auto w-full max-w-[1440px] px-3 py-4 sm:px-6 sm:py-6 lg:px-8">
                 <Outlet />
               </div>
             </div>
