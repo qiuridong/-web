@@ -18,6 +18,7 @@ import { useTheme } from 'next-themes';
 import { HexColorPicker, HexColorInput } from 'react-colorful';
 import {
   Download,
+  Image as ImageIcon,
   KeyRound,
   Loader2,
   LogOut,
@@ -27,10 +28,12 @@ import {
   RotateCcw,
   Save,
   ShieldAlert,
+  Sparkles,
   Sun,
   Upload,
   User,
   TriangleAlert,
+  Trash2,
   Info,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -63,11 +66,26 @@ import PageHeader from '@/components/common/PageHeader';
 
 import { useCurrentUser, useLogout } from '@/api/hooks/auth';
 import {
+  DEFAULT_APPEARANCE,
+  fileToDataUrl,
+  useAppearance,
+  useUpdateAppearance,
+  type AppearanceData,
+} from '@/api/hooks/appearance';
+import {
   useBackupExport,
   useBackupImport,
   useChangePassword,
   useSettings,
 } from '@/api/hooks/settings';
+import { Slider } from '@/components/ui/slider';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { useAuthStore } from '@/stores/auth.store';
 import { cn } from '@/lib/utils';
 
@@ -409,6 +427,10 @@ function AppearancePanel() {
         </RadioGroup>
       </Card>
 
+      <div className="lg:col-span-2">
+        <BrandingCard />
+      </div>
+
       <Card className="p-6">
         <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-foreground">
           <Palette className="size-4" strokeWidth={1.75} />
@@ -495,6 +517,382 @@ function AppearancePanel() {
         </div>
       </Card>
     </div>
+  );
+}
+
+/* ============ 品牌与背景 ============ */
+
+const BLEND_MODE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'normal', label: '默认 (Normal)' },
+  { value: 'multiply', label: '正片叠底 (Multiply)' },
+  { value: 'screen', label: '滤色 (Screen)' },
+  { value: 'overlay', label: '叠加 (Overlay)' },
+  { value: 'darken', label: '变暗 (Darken)' },
+  { value: 'lighten', label: '变亮 (Lighten)' },
+  { value: 'soft-light', label: '柔光 (Soft Light)' },
+  { value: 'hard-light', label: '强光 (Hard Light)' },
+];
+
+function BrandingCard() {
+  const { data: remote, isLoading } = useAppearance();
+  const update = useUpdateAppearance();
+
+  // 本地编辑态(用户改后还没保存的草稿)
+  const [draft, setDraft] = useState<AppearanceData>(DEFAULT_APPEARANCE);
+  const [logoUploading, setLogoUploading] = useState(false);
+  const [bgUploading, setBgUploading] = useState(false);
+
+  // remote 拿到后同步到 draft(只在初次加载或 remote 更新时)
+  useEffect(() => {
+    if (remote) setDraft(remote);
+  }, [remote]);
+
+  const logoFileRef = useRef<HTMLInputElement | null>(null);
+  const bgFileRef = useRef<HTMLInputElement | null>(null);
+
+  async function handleLogoPick(e: ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    e.target.value = ''; // 允许重选同一文件
+    if (!f) return;
+    setLogoUploading(true);
+    try {
+      const dataUrl = await fileToDataUrl(f, 1 * 1024 * 1024); // logo 上限 1 MB
+      setDraft((d) => ({ ...d, logo_image_data_url: dataUrl }));
+      toast.success(`Logo 已加载(${(f.size / 1024).toFixed(0)} KB),记得点保存`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '加载失败');
+    } finally {
+      setLogoUploading(false);
+    }
+  }
+
+  async function handleBgPick(e: ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    setBgUploading(true);
+    try {
+      const dataUrl = await fileToDataUrl(f, 2 * 1024 * 1024); // 背景图 2 MB
+      setDraft((d) => ({ ...d, background_image_data_url: dataUrl }));
+      toast.success(`背景图已加载(${(f.size / 1024).toFixed(0)} KB),记得点保存`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '加载失败');
+    } finally {
+      setBgUploading(false);
+    }
+  }
+
+  function clearLogo() {
+    setDraft((d) => ({ ...d, logo_image_data_url: '' }));
+  }
+  function clearBackground() {
+    setDraft((d) => ({ ...d, background_image_data_url: '' }));
+  }
+
+  function handleSave() {
+    update.mutate(draft);
+  }
+
+  function handleReset() {
+    setDraft(DEFAULT_APPEARANCE);
+    update.mutate(DEFAULT_APPEARANCE);
+  }
+
+  const dirty = !!remote && JSON.stringify(draft) !== JSON.stringify(remote);
+
+  return (
+    <Card className="p-6">
+      <div className="mb-4 flex items-center justify-between gap-2">
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          <Sparkles className="size-4" strokeWidth={1.75} />
+          品牌与背景
+        </h3>
+        {dirty ? (
+          <Badge variant="outline" className="border-warning/30 bg-warning/10 text-warning">
+            未保存
+          </Badge>
+        ) : null}
+      </div>
+      <p className="mb-5 text-xs text-muted-foreground">
+        网站标题 / 侧栏 Logo / 全局背景图。图片以 base64 内联存(Logo &lt; 1 MB,背景图 &lt; 2 MB)。
+      </p>
+
+      {isLoading ? (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Loader2 className="size-3.5 animate-spin" strokeWidth={1.75} />
+          加载中…
+        </div>
+      ) : (
+        <div className="grid gap-5 md:grid-cols-2">
+          {/* 左列:文本设置 */}
+          <div className="space-y-3.5">
+            <div className="space-y-1.5">
+              <Label htmlFor="appearance-title" className="text-xs">
+                网站标题(浏览器 tab + 侧栏)
+              </Label>
+              <Input
+                id="appearance-title"
+                value={draft.site_title}
+                onChange={(e) =>
+                  setDraft((d) => ({ ...d, site_title: e.target.value }))
+                }
+                placeholder="签到管家"
+                className="h-9"
+                maxLength={128}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="appearance-subtitle" className="text-xs">
+                副标题(侧栏品牌名下方小字,可空)
+              </Label>
+              <Input
+                id="appearance-subtitle"
+                value={draft.site_subtitle}
+                onChange={(e) =>
+                  setDraft((d) => ({ ...d, site_subtitle: e.target.value }))
+                }
+                placeholder="例如 v0.1.0 / Beta"
+                className="h-9"
+                maxLength={128}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="appearance-logo-text" className="text-xs">
+                侧栏 Logo 文本(无图时显示,1-2 字符)
+              </Label>
+              <Input
+                id="appearance-logo-text"
+                value={draft.sidebar_logo_text}
+                onChange={(e) =>
+                  setDraft((d) => ({ ...d, sidebar_logo_text: e.target.value }))
+                }
+                placeholder="签"
+                className="h-9 max-w-24 text-center font-bold"
+                maxLength={8}
+              />
+            </div>
+
+            {/* Logo 图上传 */}
+            <div className="space-y-1.5">
+              <Label className="text-xs">
+                Logo 图片(可选,覆盖文本)
+              </Label>
+              <div className="flex items-center gap-3">
+                <div className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-muted">
+                  {draft.logo_image_data_url ? (
+                    <img
+                      src={draft.logo_image_data_url}
+                      alt="logo preview"
+                      className="size-full object-cover"
+                    />
+                  ) : (
+                    <ImageIcon className="size-5 text-muted-foreground" strokeWidth={1.75} />
+                  )}
+                </div>
+                <div className="flex flex-1 flex-wrap items-center gap-2">
+                  <input
+                    ref={logoFileRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleLogoPick}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5"
+                    onClick={() => logoFileRef.current?.click()}
+                    disabled={logoUploading}
+                  >
+                    {logoUploading ? (
+                      <Loader2 className="size-3.5 animate-spin" strokeWidth={1.75} />
+                    ) : (
+                      <Upload className="size-3.5" strokeWidth={1.75} />
+                    )}
+                    {draft.logo_image_data_url ? '更换' : '上传'}
+                  </Button>
+                  {draft.logo_image_data_url ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 gap-1.5 text-danger"
+                      onClick={clearLogo}
+                    >
+                      <Trash2 className="size-3.5" strokeWidth={1.75} />
+                      清除
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 右列:背景图设置 */}
+          <div className="space-y-3.5">
+            <div className="space-y-1.5">
+              <Label className="text-xs">背景图(可选,全局应用)</Label>
+              <div className="flex items-center gap-3">
+                <div className="flex h-16 w-24 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-muted">
+                  {draft.background_image_data_url ? (
+                    <img
+                      src={draft.background_image_data_url}
+                      alt="bg preview"
+                      className="size-full object-cover"
+                    />
+                  ) : (
+                    <ImageIcon className="size-5 text-muted-foreground" strokeWidth={1.75} />
+                  )}
+                </div>
+                <div className="flex flex-1 flex-wrap items-center gap-2">
+                  <input
+                    ref={bgFileRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleBgPick}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5"
+                    onClick={() => bgFileRef.current?.click()}
+                    disabled={bgUploading}
+                  >
+                    {bgUploading ? (
+                      <Loader2 className="size-3.5 animate-spin" strokeWidth={1.75} />
+                    ) : (
+                      <Upload className="size-3.5" strokeWidth={1.75} />
+                    )}
+                    {draft.background_image_data_url ? '更换' : '上传'}
+                  </Button>
+                  {draft.background_image_data_url ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 gap-1.5 text-danger"
+                      onClick={clearBackground}
+                    >
+                      <Trash2 className="size-3.5" strokeWidth={1.75} />
+                      清除
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+
+            {/* 背景图调节(只在有背景图时显示) */}
+            {draft.background_image_data_url ? (
+              <>
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">透明度(图可见度)</Label>
+                    <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+                      {Math.round(draft.background_opacity * 100)}%
+                    </span>
+                  </div>
+                  <Slider
+                    value={[draft.background_opacity]}
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    onValueChange={(v) =>
+                      setDraft((d) => ({ ...d, background_opacity: v[0] ?? 0.3 }))
+                    }
+                  />
+                  <p className="text-[10.5px] text-muted-foreground">
+                    0% = 全黑遮罩(看不见图);100% = 完全可见(无遮罩)
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">模糊度</Label>
+                    <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+                      {draft.background_blur} px
+                    </span>
+                  </div>
+                  <Slider
+                    value={[draft.background_blur]}
+                    min={0}
+                    max={40}
+                    step={1}
+                    onValueChange={(v) =>
+                      setDraft((d) => ({ ...d, background_blur: v[0] ?? 0 }))
+                    }
+                  />
+                  <p className="text-[10.5px] text-muted-foreground">
+                    0 = 不模糊;高斯模糊增强后内容可读性
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs">混合模式</Label>
+                  <Select
+                    value={draft.background_blend_mode}
+                    onValueChange={(v) =>
+                      setDraft((d) => ({ ...d, background_blend_mode: v }))
+                    }
+                  >
+                    <SelectTrigger className="h-9">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-[260px]">
+                      {BLEND_MODE_OPTIONS.map((o) => (
+                        <SelectItem key={o.value} value={o.value}>
+                          {o.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </>
+            ) : (
+              <p className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+                上传背景图后可调节透明度 / 模糊 / 混合模式
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 保存 / 重置 — 双列底部 */}
+      <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-border/60 pt-4">
+        <Button
+          size="sm"
+          onClick={handleSave}
+          disabled={!dirty || update.isPending}
+        >
+          {update.isPending ? (
+            <Loader2 className="mr-1.5 size-4 animate-spin" strokeWidth={1.75} />
+          ) : (
+            <Save className="mr-1.5 size-4" strokeWidth={1.75} />
+          )}
+          保存外观设置
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleReset}
+          disabled={update.isPending}
+        >
+          <RotateCcw className="mr-1.5 size-4" strokeWidth={1.75} />
+          恢复默认
+        </Button>
+        {dirty ? (
+          <p className="ml-auto text-[11px] text-muted-foreground">
+            ⚠️ 有未保存改动,点保存才生效
+          </p>
+        ) : (
+          <p className="ml-auto text-[11px] text-muted-foreground">设置生效全站</p>
+        )}
+      </div>
+    </Card>
   );
 }
 

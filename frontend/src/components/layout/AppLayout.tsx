@@ -60,6 +60,7 @@ import {
 import { useUIStore } from '@/stores/ui.store';
 import { useAuthStore } from '@/stores/auth.store';
 import { useCurrentUser, useLogout, meToAuthUser } from '@/api/hooks/auth';
+import { useAppearance, DEFAULT_APPEARANCE } from '@/api/hooks/appearance';
 import { cn } from '@/lib/utils';
 import { CommandPalette } from '@/components/common/CommandPalette';
 
@@ -197,9 +198,17 @@ const NAV_ITEMS: NavItem[] = [
 function Sidebar({
   collapsed,
   onToggle,
+  logoImageUrl,
+  logoText,
+  siteTitle,
+  siteSubtitle,
 }: {
   collapsed: boolean;
   onToggle: () => void;
+  logoImageUrl?: string;
+  logoText?: string;
+  siteTitle?: string;
+  siteSubtitle?: string;
 }) {
   const location = useLocation();
   return (
@@ -222,17 +231,30 @@ function Sidebar({
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
         )}
       >
-        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
-          <span className="text-sm font-bold tracking-tight">签</span>
+        <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-primary text-primary-foreground shadow-sm">
+          {logoImageUrl ? (
+            <img
+              src={logoImageUrl}
+              alt={siteTitle ?? 'Logo'}
+              className="size-full object-cover"
+              draggable={false}
+            />
+          ) : (
+            <span className="text-sm font-bold tracking-tight">
+              {logoText || '签'}
+            </span>
+          )}
         </div>
         {!collapsed && (
           <div className="flex min-w-0 flex-col leading-tight">
             <span className="truncate text-sm font-semibold tracking-tight">
-              签到管家
+              {siteTitle || '签到管家'}
             </span>
-            <span className="text-[10px] font-medium text-muted-foreground">
-              v0.1.0
-            </span>
+            {siteSubtitle ? (
+              <span className="truncate text-[10px] font-medium text-muted-foreground">
+                {siteSubtitle}
+              </span>
+            ) : null}
           </div>
         )}
       </button>
@@ -298,6 +320,17 @@ export function AppLayout() {
   const location = useLocation();
   const navigate = useNavigate();
 
+  // 应用外观品牌设置(站点标题 / logo / 背景图)
+  const { data: appearance } = useAppearance();
+  const app = appearance ?? DEFAULT_APPEARANCE;
+
+  // document.title 同步(浏览器 tab 显示)
+  useEffect(() => {
+    if (app.site_title) {
+      document.title = app.site_title;
+    }
+  }, [app.site_title]);
+
   // 401 → /login
   useEffect(() => {
     function handler() {
@@ -309,6 +342,31 @@ export function AppLayout() {
   }, [navigate, location.pathname, location.search]);
 
   const sidebarWidth = sidebarCollapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH;
+
+  // 背景图 inline style(应用到 main 滚动容器)
+  const hasBackground = !!app.background_image_data_url;
+  const mainStyle: React.CSSProperties = hasBackground
+    ? {
+        backgroundImage: `url("${app.background_image_data_url}")`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+        backgroundBlendMode: app.background_blend_mode || 'normal',
+      }
+    : {};
+
+  // 背景图模糊覆盖层 + opacity 暗罩(用 ::before pseudo 不行,用 overlay div)
+  const backgroundOverlayStyle: React.CSSProperties = hasBackground
+    ? {
+        position: 'absolute',
+        inset: 0,
+        pointerEvents: 'none',
+        // opacity=1 → 全透明(完全看清背景图),opacity=0 → 全黑遮罩(完全隐藏背景图)
+        backgroundColor: `rgba(0, 0, 0, ${1 - Math.max(0, Math.min(1, app.background_opacity))})`,
+        backdropFilter: app.background_blur > 0 ? `blur(${app.background_blur}px)` : undefined,
+        WebkitBackdropFilter: app.background_blur > 0 ? `blur(${app.background_blur}px)` : undefined,
+      }
+    : {};
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -323,6 +381,10 @@ export function AppLayout() {
         <Sidebar
           collapsed={sidebarCollapsed}
           onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+          logoImageUrl={app.logo_image_data_url}
+          logoText={app.sidebar_logo_text}
+          siteTitle={app.site_title}
+          siteSubtitle={app.site_subtitle}
         />
 
         {/* 主区(顶栏 + Outlet),纵向 flex 让顶栏 sticky 在自己内部 */}
@@ -361,9 +423,12 @@ export function AppLayout() {
             </div>
           </header>
 
-          {/* 主区滚动容器 */}
-          <main className="flex-1 overflow-auto">
-            <div className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8">
+          {/* 主区滚动容器 — 含可选背景图 + overlay(opacity 暗罩 + 模糊) */}
+          <main className="relative flex-1 overflow-auto" style={mainStyle}>
+            {hasBackground ? (
+              <div style={backgroundOverlayStyle} aria-hidden="true" />
+            ) : null}
+            <div className="relative z-[1] mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8">
               <Outlet />
             </div>
           </main>
