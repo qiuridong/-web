@@ -26,6 +26,11 @@ export interface UploadOptions {
   force?: boolean;
   /** 是否上传前自动 dry-run,默认 true */
   dry_run?: boolean;
+  /**
+   * MVP-2 推送同步:上传后立即推送到这些节点
+   * (仅 enabled + 非 local 的会被实际加入推送队列)
+   */
+  sync_to_nodes?: number[];
 }
 
 export interface DryRunResult {
@@ -44,6 +49,11 @@ export interface UploadResponse {
   total_bytes: number;
   dry_run: DryRunResult | null;
   script_record: Record<string, unknown> | null;
+  /**
+   * MVP-2 推送同步:实际加入推送队列的 node_id 列表
+   * (主面板过滤 local / disabled / 不存在后的结果)
+   */
+  sync_requested_node_ids: number[];
 }
 
 export class UploadError extends Error {
@@ -133,6 +143,10 @@ export function useScriptUpload(): UseScriptUploadReturn {
       if (opts.force) qs.set('force', 'true');
       // 默认开 dry_run
       qs.set('dry_run', String(opts.dry_run ?? true));
+      // MVP-2:推送同步到指定节点(逗号分隔)
+      if (opts.sync_to_nodes && opts.sync_to_nodes.length > 0) {
+        qs.set('sync_to_nodes', opts.sync_to_nodes.join(','));
+      }
       const url = `/api/v1/scripts/upload?${qs.toString()}`;
 
       return new Promise<UploadResponse>((resolve, reject) => {

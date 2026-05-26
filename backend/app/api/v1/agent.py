@@ -37,6 +37,7 @@ from app.config import get_settings
 from app.core.crypto import get_cipher
 from app.core.exceptions import RunNotFound, ScriptNotFound, ValidationError
 from app.db.models.instance import Instance
+from app.db.models.node import Node
 from app.db.models.run import Run
 from app.db.models.script import Script
 from app.db.session import SessionLocal
@@ -46,10 +47,13 @@ from app.runner.log_broker import get_log_broker
 from app.schemas.node import (
     AgentHeartbeatRequest,
     AgentHeartbeatResponse,
+    AgentInventoryReport,
+    AgentInventoryResponse,
     AgentPollResponse,
     AgentResultRequest,
     AgentStdoutRequest,
     AgentTaskPayload,
+    PendingActions,
 )
 from app.scheduler.executor import _extract_env_passthrough
 from app.services import node_service, script_upload_service
@@ -75,6 +79,46 @@ POLL_TICK_SEC = 1.0
 # ============================================================
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _parse_pending_actions(raw: str | None) -> PendingActions:
+    """从 nodes.pending_actions(JSON string)反序列化。
+
+    失败 / 空 → 返回空 PendingActions(不抛)。
+    """
+    if not raw or raw == "{}":
+        return PendingActions()
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            return PendingActions()
+        return PendingActions(
+            sync=[str(s) for s in data.get("sync", []) if isinstance(s, str)],
+            delete=[str(s) for s in data.get("delete", []) if isinstance(s, str)],
+        )
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        logger.warning("parse_pending_actions 失败 raw={!r} err={}", raw, exc)
+        return PendingActions()
+
+
+def _dump_pending_actions(actions: PendingActions) -> str:
+    """序列化 PendingActions 回 JSON string。"""
+    return json.dumps(
+        {"sync": actions.sync, "delete": actions.delete},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def _peek_pending_actions(db: Session, node_id: int) -> PendingActions | None:
+    """读节点当前 pending_actions;为空返 None(避免给 agent 空 dict 噪音)。"""
+    node = db.get(Node, node_id)
+    if node is None:
+        return None
+    actions = _parse_pending_actions(node.pending_actions)
+    if not actions.sync and not actions.delete:
+        return None
+    return actions
 
 
 def _pluck_pending_task(db: Session, node_slug: str) -> Run | None:
@@ -197,11 +241,18 @@ async def agent_poll(
                     run.id,
                     run.instance_id,
                 )
-                return AgentPollResponse(task=payload)
+                # 顺手捎带 pending_actions(主面板 → agent 的 push 通道)
+                pending = _peek_pending_actions(db, node.id)
+                return AgentPollResponse(task=payload, pending_actions=pending)
 
-        # 没拉到 — 看是否到 deadline
+            # 没拉到 task 也要看 pending_actions — 立即返,让 agent 别等
+            pending = _peek_pending_actions(db, node.id)
+            if pending is not None:
+                return AgentPollResponse(task=None, pending_actions=pending)
+
+        # 没拉到 + 无 pending — 看是否到 deadline
         if _utcnow().timestamp() >= deadline:
-            return AgentPollResponse(task=None)
+            return AgentPollResponse(task=None, pending_actions=None)
         # 间隔等
         await asyncio.sleep(POLL_TICK_SEC)
 
@@ -517,4 +568,76 @@ async def agent_get_script_bundle(
             "X-Bundle-Size": str(size),
             "Cache-Control": "no-store",
         },
+    )
+
+
+# ============================================================
+# MVP-2 · Inventory Report(agent → 主面板 ack + 报告本地部署)
+# ============================================================
+@router.post(
+    "/inventory-report",
+    response_model=AgentInventoryResponse,
+    summary="Agent 报告本地部署 + ack 已处理的 pending_actions",
+)
+async def agent_inventory_report(
+    payload: AgentInventoryReport,
+    node: AgentNode,
+    db: DBSession,
+) -> AgentInventoryResponse:
+    """Agent 调:报告本地实际部署的脚本 + ack 刚处理完的 pending_actions。
+
+    流程:
+    1. 主面板用 payload.deployed_scripts **覆盖** ``nodes.deployed_scripts``
+       (agent 是单一事实源)
+    2. 主面板从 ``nodes.pending_actions.sync`` 移除 acked.sync 里的 slug
+    3. 主面板从 ``nodes.pending_actions.delete`` 移除 acked.delete 里的 slug
+    4. 返回 ack 后的剩余 pending_actions(可能有新加的,告诉 agent 还要做)
+    """
+    node_row = db.get(Node, node.id)
+    if node_row is None:
+        # 不可能 — middleware 拿到的 node 一定在 DB
+        raise ValidationError(
+            "node 不存在(middleware 状态异常)",
+            details={"node_id": node.id},
+        )
+
+    # 1. 覆盖 deployed_scripts(agent 是事实源)
+    try:
+        node_row.deployed_scripts = json.dumps(
+            payload.deployed_scripts,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+    except (TypeError, ValueError) as exc:
+        logger.warning(
+            "inventory: 序列化 deployed_scripts 失败 node={} err={}",
+            node.slug, exc,
+        )
+
+    # 2 + 3. 从 pending_actions 移除 acked entry
+    current = _parse_pending_actions(node_row.pending_actions)
+    acked_sync = set(payload.acked_actions.sync)
+    acked_delete = set(payload.acked_actions.delete)
+
+    new_actions = PendingActions(
+        sync=[s for s in current.sync if s not in acked_sync],
+        delete=[s for s in current.delete if s not in acked_delete],
+    )
+    node_row.pending_actions = _dump_pending_actions(new_actions)
+
+    db.commit()
+
+    logger.info(
+        "agent.inventory: node {!r} deployed={} acked_sync={} acked_delete={} remaining_sync={} remaining_delete={}",
+        node.slug,
+        list(payload.deployed_scripts.keys()),
+        list(acked_sync),
+        list(acked_delete),
+        new_actions.sync,
+        new_actions.delete,
+    )
+
+    return AgentInventoryResponse(
+        ok=True,
+        pending_actions_after=new_actions,
     )

@@ -73,6 +73,14 @@ class UploadResponse(BaseModel):
             "失败(例如 manifest 解析失败但 dry-run 通过)时为 null。"
         ),
     )
+    sync_requested_node_ids: list[int] = Field(
+        default_factory=list,
+        description=(
+            "MVP-2 推送同步:上传时若选了 ?sync_to_nodes=...,本字段返回**实际**加入"
+            "推送队列的 node_id 列表(过滤掉 local / disabled / 不存在的)。"
+            "Agent 下次 poll(最长 30s)会自动拉脚本同步。"
+        ),
+    )
 
 
 # ============================================================

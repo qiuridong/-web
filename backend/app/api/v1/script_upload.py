@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import json
 import shutil
 import tempfile
 from pathlib import Path
@@ -22,12 +23,14 @@ from typing import Annotated, Any
 from fastapi import APIRouter, File, Query, Request, UploadFile, status
 from fastapi.responses import PlainTextResponse
 from loguru import logger
+from sqlalchemy import select
 
 from app.config import get_settings
 from app.core.exceptions import (
     PayloadTooLarge,
     ValidationError,
 )
+from app.db.models.node import Node
 from app.deps import CurrentUser, DBSession
 from app.schemas.script_upload import (
     FileListResponse,
@@ -69,6 +72,17 @@ async def upload_script(
         bool,
         Query(description="是否上传前跑 dry-run(默认 true,推荐)"),
     ] = True,
+    sync_to_nodes: Annotated[
+        str | None,
+        Query(
+            description=(
+                "MVP-2 推送同步:上传成功后立即把脚本推送到这些节点(逗号分隔 node_id,"
+                "如 '2,3')。仅 enabled 且非 local 的节点生效。"
+                "Agent 下次 poll(最长 30s)会自动 pull bundle.zip 并解压。"
+            ),
+            max_length=512,
+        ),
+    ] = None,
     files: Annotated[
         list[UploadFile] | None,
         File(description="multipart 多文件;与 application/zip 二选一"),
@@ -262,13 +276,27 @@ async def upload_script(
             p.stat().st_size for p in target_dir.rglob("*") if p.is_file()
         )
 
+        # MVP-2 推送同步:把 slug 加到选定节点的 pending_actions.sync
+        sync_requested_node_ids: list[int] = []
+        if sync_to_nodes:
+            sync_requested_node_ids = _request_node_sync(
+                db, final_slug, sync_to_nodes
+            )
+            if sync_requested_node_ids:
+                db.commit()
+                logger.info(
+                    "推送同步排队 slug={} → nodes={}",
+                    final_slug, sync_requested_node_ids,
+                )
+
         logger.info(
-            "脚本上传成功 slug={} files={} total_bytes={} dry_run={} scan_added={}",
+            "脚本上传成功 slug={} files={} total_bytes={} dry_run={} scan_added={} sync_to_nodes={}",
             final_slug,
             len(files_written),
             total_bytes,
             bool(dry_run_result),
             scan_result.get("added"),
+            sync_requested_node_ids,
         )
 
         return UploadResponse(
@@ -278,6 +306,7 @@ async def upload_script(
             total_bytes=total_bytes,
             dry_run=dry_run_result,
             script_record=script_record_dict,
+            sync_requested_node_ids=sync_requested_node_ids,
         )
 
     finally:
@@ -431,3 +460,77 @@ def _short_uuid() -> str:
     """8 字符随机后缀(供 tmp 目录命名)。"""
     import uuid  # 局部 import 避免污染模块
     return uuid.uuid4().hex[:8]
+
+
+def _parse_node_ids(raw: str) -> list[int]:
+    """解析 query 里的逗号分隔 node_id,失败的项跳过。"""
+    out: list[int] = []
+    for piece in raw.split(","):
+        piece = piece.strip()
+        if not piece:
+            continue
+        try:
+            nid = int(piece)
+        except ValueError:
+            continue
+        if nid > 0 and nid not in out:
+            out.append(nid)
+    return out
+
+
+def _request_node_sync(
+    db,
+    slug: str,
+    sync_to_nodes_raw: str,
+) -> list[int]:
+    """把 ``slug`` append 到选定节点的 ``pending_actions.sync`` 列表。
+
+    过滤规则:
+    - 必须 enabled
+    - 必须非 ``is_local``(local 节点就是源,不需要同步)
+    - 重复的 slug 在 sync 列表里去重
+
+    :returns: 实际加入推送队列的 node_id 列表(过滤后)
+    """
+    requested_ids = _parse_node_ids(sync_to_nodes_raw)
+    if not requested_ids:
+        return []
+
+    # 查 nodes,过滤 enabled + 非 local
+    nodes = (
+        db.scalars(
+            select(Node).where(
+                Node.id.in_(requested_ids),
+                Node.enabled.is_(True),
+                Node.is_local.is_(False),
+            )
+        ).all()
+    )
+
+    accepted: list[int] = []
+    for node in nodes:
+        # 解析现有 pending_actions
+        try:
+            current = json.loads(node.pending_actions or "{}")
+            if not isinstance(current, dict):
+                current = {}
+        except (json.JSONDecodeError, TypeError, ValueError):
+            current = {}
+
+        sync_list = [str(s) for s in current.get("sync", []) if isinstance(s, str)]
+        delete_list = [
+            str(s) for s in current.get("delete", []) if isinstance(s, str)
+        ]
+
+        # 去重 append
+        if slug not in sync_list:
+            sync_list.append(slug)
+
+        node.pending_actions = json.dumps(
+            {"sync": sync_list, "delete": delete_list},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        accepted.append(node.id)
+
+    return accepted

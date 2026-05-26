@@ -139,16 +139,73 @@ class AgentTaskPayload(BaseModel):
     env_passthrough: list[str] = Field(default_factory=list)
 
 
+class PendingActions(BaseModel):
+    """节点待处理指令(主面板 → agent 的"推送"机制,通过 poll piggyback)。
+
+    - ``sync``:agent 应该拉这些 slug(调 ``_ensure_script_synced``)
+    - ``delete``:agent 应该删本地 ``scripts/<slug>/``
+
+    主面板把 ``nodes.pending_actions`` JSON 反序列化后,**非空时**附在 poll
+    response 里;agent 处理完调 ``/agent/inventory-report`` ack。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    sync: list[str] = Field(default_factory=list)
+    delete: list[str] = Field(default_factory=list)
+
+
 class AgentPollResponse(BaseModel):
     """``GET /agent/poll?wait=30`` 响应。
 
-    - 有任务:``{"task": {...}}``
-    - 无任务:``{"task": null}``(等了 wait 秒返回)
+    - 有任务:``{"task": {...}, "pending_actions": null|{...}}``
+    - 无任务:``{"task": null, "pending_actions": null|{...}}``(等了 wait 秒返回)
+
+    无论有无 task,**都会捎带 pending_actions**(若非空)— 这是主面板向 agent
+    "推送" 的唯一通道(agent pull only,无 push)。
     """
 
     model_config = ConfigDict(extra="forbid")
 
     task: AgentTaskPayload | None = None
+    pending_actions: PendingActions | None = None
+
+
+class AgentInventoryReport(BaseModel):
+    """``POST /agent/inventory-report`` 请求体 — agent 主动报告本地情况 + ack。
+
+    时机:
+    - agent 启动后第一次 sanity check 通过
+    - agent 处理完 ``pending_actions`` 中的 sync/delete 之后
+    - 兜底周期(可选,如每 5 min 一次)
+
+    Agent 报告 ``deployed_scripts``(本地实际有的 slug → sha256)+
+    ``acked_actions``(刚处理完哪些);主面板更新 ``nodes.deployed_scripts``
+    + 从 ``nodes.pending_actions`` 移除 acked 的 entry。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    deployed_scripts: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description='{"slug": {"sha256": "...", "deployed_at": "ISO"}}',
+    )
+    acked_actions: PendingActions = Field(
+        default_factory=PendingActions,
+        description="agent 刚处理完的 sync/delete slug,主面板从 pending_actions 移除",
+    )
+
+
+class AgentInventoryResponse(BaseModel):
+    """``POST /agent/inventory-report`` 响应。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ok: bool = True
+    pending_actions_after: PendingActions = Field(
+        default_factory=PendingActions,
+        description="ack 之后**剩余**的 pending_actions(可能有新加的,告诉 agent 还要做)",
+    )
 
 
 class AgentResultRequest(BaseModel):

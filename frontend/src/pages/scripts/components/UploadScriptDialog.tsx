@@ -362,17 +362,19 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
         slug: slugTrim || undefined,
         force,
         dry_run: dryRun,
+        sync_to_nodes: selectedNodeIds.length > 0 ? selectedNodeIds : undefined,
       });
       setResult(resp);
       setPhase('success');
-      // MVP-2 · 仅提示,不实际推送 — agent 在跑实例时自动 Pull 同步
-      if (selectedNodeIds.length > 0) {
+      // MVP-2 推送同步:主面板已把 slug 加入选定节点的 pending_actions.sync
+      // agent 下次 poll(最长 30s)会自动拉 bundle.zip 并解压
+      if (resp.sync_requested_node_ids && resp.sync_requested_node_ids.length > 0) {
         const nodeNames = enabledNodes
-          .filter((n) => selectedNodeIds.includes(n.id))
+          .filter((n) => resp.sync_requested_node_ids.includes(n.id))
           .map((n) => n.slug)
           .join(' / ');
         toast.info(
-          `已上传到主面板。选中的 ${selectedNodeIds.length} 个节点(${nodeNames})会在创建/跑实例时自动 Pull 同步脚本`,
+          `已要求 ${resp.sync_requested_node_ids.length} 个节点(${nodeNames})立即同步,最长 30 秒内完成`,
           { duration: 8000 },
         );
       }
@@ -687,7 +689,7 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
                     </ul>
                   )}
                   <p className="text-[10.5px] text-muted-foreground">
-                    本次为预提示,不会立即推送。脚本会在 <strong>首次跑实例时</strong> 由 agent 自动 Pull 同步(MVP-2,按需,免维护)。
+                    勾选后,上传成功立即把 slug 加入对应节点的待办队列,agent 长轮询(最长 30 秒)自动 Pull 同步。
                   </p>
                 </div>
               </div>

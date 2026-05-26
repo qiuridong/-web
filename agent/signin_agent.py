@@ -93,6 +93,20 @@ BUNDLE_FILE_MAX_BYTES = 256 * 1024
 # bundle 总未压缩上限 — 与 backend MAX_ZIP_TOTAL_BYTES 对齐 1 MiB
 BUNDLE_TOTAL_MAX_BYTES = 1 * 1024 * 1024
 
+# MVP-2 · sync 时保留的"运行时产物目录"(bundle 不含这些,但本地有就保留)
+# 这些目录由脚本运行时生成(selenium driver cache / 实例 data / cookies / etc),
+# 全目录替换式 sync 会丢掉,所以在 os.replace 前先 move 到 tmp 里保留。
+RUNTIME_PRESERVE_DIRS: frozenset[str] = frozenset({
+    "downloaded_files",      # seleniumbase chromedriver lock 等
+    "data",                  # 历史数据
+    "__pycache__",           # 字节码 cache(下次重生成)
+    "_dry_run_data",         # dry-run 产物
+    ".backups",              # 在线编辑生成的备份
+})
+
+# Inventory report 周期(秒)— agent 主动报告本地部署 + 探测 pending_actions
+INVENTORY_REPORT_INTERVAL_SEC = 300  # 5 min 兜底,避免 poll 漏 pending hint
+
 
 # ============================================================
 # 配置加载
@@ -202,11 +216,18 @@ class Agent:
         # 启动心跳线程
         self._start_heartbeat()
 
+        # 启动时报告本地 inventory(让主面板的 nodes.deployed_scripts 与现实对齐)
+        try:
+            self._post_inventory_report(acked_sync=[], acked_delete=[])
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning(f"启动 inventory-report 失败(忽略): {exc}")
+
         # 主 poll 循环
+        last_inventory_report_at = time.monotonic()
         try:
             while not _stop_event.is_set():
                 try:
-                    task = self._poll()
+                    task, pending_actions = self._poll()
                 except (httpx.TimeoutException, httpx.NetworkError) as exc:
                     self.logger.warning(
                         f"poll 网络错误({type(exc).__name__}): {exc},"
@@ -232,6 +253,17 @@ class Agent:
                     self._wait_with_backoff()
                     continue
 
+                # MVP-2 推送同步:先处理 pending_actions(主面板 → agent 的 push)
+                if pending_actions is not None and (
+                    pending_actions.get("sync") or pending_actions.get("delete")
+                ):
+                    try:
+                        self._handle_pending_actions(pending_actions)
+                    except Exception as exc:  # noqa: BLE001
+                        self.logger.exception(
+                            f"处理 pending_actions 未捕获异常: {exc}"
+                        )
+
                 # 拿到任务就跑(单线程,串行)
                 if task is not None:
                     # 重置 backoff(刚有任务 = 网络通畅)
@@ -246,6 +278,22 @@ class Agent:
                 else:
                     # 无任务 — 立即再 poll(server long-polling 已经等了 30s)
                     pass
+
+                # 周期 inventory-report 兜底(防 pending_actions 在 poll 间隙
+                # 被新加的、agent 漏掉:周期上报会触发主面板再 push)
+                if (
+                    time.monotonic() - last_inventory_report_at
+                    > INVENTORY_REPORT_INTERVAL_SEC
+                ):
+                    try:
+                        self._post_inventory_report(
+                            acked_sync=[], acked_delete=[]
+                        )
+                        last_inventory_report_at = time.monotonic()
+                    except Exception as exc:  # noqa: BLE001
+                        self.logger.debug(
+                            f"周期 inventory-report 失败(忽略): {exc}"
+                        )
 
         except KeyboardInterrupt:
             self.logger.info("被 Ctrl-C 中断,退出")
@@ -373,14 +421,18 @@ class Agent:
     # ----------------------------------------------------------
     # poll
     # ----------------------------------------------------------
-    def _poll(self) -> dict[str, Any] | None:
+    def _poll(self) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        """Long-polling 拉 task + 读 pending_actions(piggyback push)。
+
+        :returns: ``(task | None, pending_actions | None)``
+        """
         r = self.client.get(
             "/api/v1/agent/poll",
             params={"wait": POLL_WAIT_SEC},
         )
         r.raise_for_status()
         data = r.json()
-        return data.get("task")
+        return data.get("task"), data.get("pending_actions")
 
     def _wait_with_backoff(self) -> None:
         # 分块等待,响应 SIGTERM
@@ -544,6 +596,34 @@ class Agent:
                 remote_sha, encoding="utf-8"
             )
 
+            # MVP-2 · 保留运行时产物:把旧目录里的 RUNTIME_PRESERVE_DIRS move 到
+            # tmp_dir 对应位置,这样 os.replace 之后不会丢
+            # (bundle 不含这些目录,所以 tmp_dir 里同名位置必然为空,不会冲突)
+            preserved: list[str] = []
+            if script_dir.exists():
+                for preserve_name in RUNTIME_PRESERVE_DIRS:
+                    src = script_dir / preserve_name
+                    if not src.exists():
+                        continue
+                    dst = tmp_dir / preserve_name
+                    if dst.exists():
+                        # tmp 里已有同名(不太可能,bundle 过滤了)— 跳过保留旧
+                        self.logger.debug(
+                            f"sync: tmp 已含 {preserve_name},跳过保留 src"
+                        )
+                        continue
+                    try:
+                        os.replace(src, dst)
+                        preserved.append(preserve_name)
+                    except OSError as exc:
+                        self.logger.warning(
+                            f"保留运行时目录失败 {src}: {exc}(不阻断 sync)"
+                        )
+            if preserved:
+                self.logger.info(
+                    f"sync: 保留运行时产物 {preserved} from {script_slug}"
+                )
+
             # 备份旧目录(若存在)
             backup_dir: Path | None = None
             if script_dir.exists():
@@ -590,6 +670,129 @@ class Agent:
                 except OSError:
                     pass
             raise
+
+    # ----------------------------------------------------------
+    # MVP-2 · pending_actions 处理 + inventory report
+    # ----------------------------------------------------------
+    def _handle_pending_actions(self, actions: dict[str, Any]) -> None:
+        """处理主面板 push 来的待办指令:sync / delete。
+
+        :param actions: ``{"sync": [...], "delete": [...]}``
+
+        流程:
+        1. 对每个 sync slug → 跑 ``_ensure_script_synced``;成功的进 acked_sync
+        2. 对每个 delete slug → ``rm -rf scripts/<slug>/``;成功的进 acked_delete
+        3. 调 ``POST /agent/inventory-report`` 带 acked + 本地最新 deployed
+        """
+        sync_slugs = [s for s in actions.get("sync") or [] if isinstance(s, str)]
+        delete_slugs = [s for s in actions.get("delete") or [] if isinstance(s, str)]
+
+        if not sync_slugs and not delete_slugs:
+            return
+
+        self.logger.info(
+            f"⤓ 主面板推送指令: sync={sync_slugs} delete={delete_slugs}"
+        )
+
+        acked_sync: list[str] = []
+        acked_delete: list[str] = []
+
+        for slug in sync_slugs:
+            try:
+                self._ensure_script_synced(slug)
+                acked_sync.append(slug)
+            except Exception as exc:  # noqa: BLE001
+                self.logger.error(f"推送同步失败 slug={slug}: {exc}")
+
+        for slug in delete_slugs:
+            target = self.config.scripts_dir / slug
+            try:
+                if target.is_dir():
+                    shutil.rmtree(target)
+                    self.logger.info(f"✗ 已删除脚本目录 {target}")
+                else:
+                    self.logger.info(f"删除请求 — 目录已不存在 {target}")
+                acked_delete.append(slug)
+            except OSError as exc:
+                self.logger.error(f"删除脚本失败 slug={slug}: {exc}")
+
+        # ack + 报告本地 inventory
+        try:
+            self._post_inventory_report(
+                acked_sync=acked_sync,
+                acked_delete=acked_delete,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning(
+                f"inventory-report 失败(ack 未送达,下轮 poll 会重收): {exc}"
+            )
+
+    def _scan_local_deployed_scripts(self) -> dict[str, dict[str, Any]]:
+        """扫 scripts_dir 列出所有部署的 slug + sha256 marker。
+
+        :returns: ``{slug: {"sha256": "...", "deployed_at": "ISO"}}``
+        """
+        out: dict[str, dict[str, Any]] = {}
+        if not self.config.scripts_dir.is_dir():
+            return out
+        for entry in self.config.scripts_dir.iterdir():
+            if not entry.is_dir():
+                continue
+            # 跳过 tmp / backup 目录
+            if entry.name.startswith(".tmp-") or entry.name.startswith(".backup-"):
+                continue
+            slug = entry.name
+            marker = entry / BUNDLE_MARKER_FILE
+            sha = ""
+            if marker.is_file():
+                try:
+                    sha = marker.read_text(encoding="utf-8").strip()
+                except OSError:
+                    pass
+            # main.py 的 mtime 当 deployed_at(若无 marker)
+            main_py = entry / "main.py"
+            if main_py.is_file():
+                deployed_at = (
+                    main_py.stat().st_mtime if not sha else marker.stat().st_mtime
+                )
+                from datetime import datetime as _dt, timezone as _tz
+                iso = _dt.fromtimestamp(deployed_at, tz=_tz.utc).isoformat()
+                out[slug] = {"sha256": sha, "deployed_at": iso}
+        return out
+
+    def _post_inventory_report(
+        self,
+        *,
+        acked_sync: list[str],
+        acked_delete: list[str],
+    ) -> None:
+        """POST /api/v1/agent/inventory-report — 报告本地 + ack 已处理指令。"""
+        deployed = self._scan_local_deployed_scripts()
+        body = {
+            "deployed_scripts": deployed,
+            "acked_actions": {
+                "sync": acked_sync,
+                "delete": acked_delete,
+            },
+        }
+        r = self.client.post(
+            "/api/v1/agent/inventory-report",
+            json=body,
+            timeout=15,
+        )
+        r.raise_for_status()
+        # 响应里 pending_actions_after 是 ack 后剩余的;我们这里不复杂处理,
+        # 下次 poll 自然会拿到(同样的内容)。极小概率会重复处理,但 sync 是
+        # 幂等的(sha256 一致 = no-op),delete 也是(rm 不存在 = no-op)。
+        try:
+            after = r.json().get("pending_actions_after") or {}
+            self.logger.debug(
+                f"inventory-report OK acked_sync={acked_sync} "
+                f"acked_delete={acked_delete} "
+                f"remaining={after}"
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     # ----------------------------------------------------------
     # 执行 task
