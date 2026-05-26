@@ -431,6 +431,7 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
                 setErrorMsg(null);
                 setErrorDetail(null);
               }}
+              onOpenGuide={() => setGuideOpen(true)}
             />
           ) : (
             <>
@@ -964,11 +965,32 @@ function ErrorPanel({
   message,
   detail,
   onRetry,
+  onOpenGuide,
 }: {
   message: string;
   detail: unknown;
   onRetry: () => void;
+  onOpenGuide?: () => void;
 }) {
+  // 探测 dry-run 失败(最常见上传 422 原因)
+  const dryRunFailure = (() => {
+    if (!detail || typeof detail !== 'object') return null;
+    const d = detail as Record<string, unknown>;
+    if (d.dry_run && typeof d.dry_run === 'object') {
+      const dr = d.dry_run as {
+        passed?: boolean;
+        exit_code?: number;
+        timed_out?: boolean;
+        stderr_excerpt?: string;
+      };
+      // dry_run.passed=false 或 exit_code != 0 都算失败
+      if (dr.passed === false || (dr.exit_code !== undefined && dr.exit_code !== 0)) {
+        return dr;
+      }
+    }
+    return null;
+  })();
+
   // 把 detail 里可能藏的 dry-run stderr / pydantic 校验列表抽出来
   const renderDetail = (): string | null => {
     if (!detail || typeof detail !== 'object') return null;
@@ -1003,10 +1025,51 @@ function ErrorPanel({
         </div>
       </div>
 
+      {/* dry-run 失败的智能提示(最常见 422 原因) */}
+      {dryRunFailure ? (
+        <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-xs">
+          <div className="flex items-start gap-2">
+            <BookOpen className="mt-0.5 size-4 shrink-0 text-warning" strokeWidth={1.75} />
+            <div className="min-w-0 flex-1 space-y-2">
+              <p className="font-semibold text-foreground">
+                最常见原因:<code className="font-mono">run()</code> 在 dry-run 时返了 success=False
+              </p>
+              <p className="text-muted-foreground">
+                平台上传时用 <strong>空 config + run_id=0 + instance_id=0</strong> 跑一次{' '}
+                <code className="font-mono">run()</code> 验证脚本结构。sandbox_runner 把{' '}
+                <code className="font-mono">success=False</code> 转成进程退出码 1 → 上传被拒。
+              </p>
+              <p className="text-muted-foreground">
+                解决:在 <code className="font-mono">run()</code> 第一行加 dry-run 短路:
+              </p>
+              <pre className="overflow-x-auto rounded border border-border bg-card/60 p-2 font-mono text-[10.5px] text-foreground">
+{`if context.run_id == 0 and context.instance_id == 0:
+    return RunResult(success=True, message="dry-run OK")`}
+              </pre>
+              {onOpenGuide ? (
+                <button
+                  type="button"
+                  onClick={onOpenGuide}
+                  className="text-[11px] font-medium text-primary hover:underline"
+                >
+                  📖 查看完整说明(脚本开发指南 → dry-run 短路)
+                </button>
+              ) : null}
+              {dryRunFailure.timed_out ? (
+                <p className="text-muted-foreground">
+                  <strong>注意:</strong>本次还 timed_out。脚本可能在 run() 里 sleep 太久,
+                  dry-run 默认 30 秒超时。把耗时操作放进 dry-run 短路之外。
+                </p>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {detailText ? (
         <div>
           <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">
-            详细信息
+            {dryRunFailure ? '脚本 stderr' : '详细信息'}
           </p>
           <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-card/40 p-3 font-mono text-[10px] text-muted-foreground">
             {detailText}
