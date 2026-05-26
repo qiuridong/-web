@@ -148,6 +148,115 @@ export function useUpdateAppearance(): UseMutationResult<
 
 // ====================== 工具函数 ======================
 
+// ====================== 预设背景(SVG 渐变 / 几何) ======================
+
+export interface BackgroundPreset {
+  id: string;
+  name: string;
+  /** SVG inline data URL,用户一键选 → setDraft({...d, background_image_data_url: dataUrl}) */
+  dataUrl: string;
+  /** 缩略图 CSS background(优化用,直接显示在预设网格,避免每个 swatch 加载完整 SVG)*/
+  thumb: string;
+}
+
+function svgToDataUrl(svg: string): string {
+  // 用 encodeURIComponent 而不是 btoa(SVG 含中文 / Unicode 时 btoa 会炸)
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg.trim())}`;
+}
+
+/** 6 张内置背景(SVG 渐变 / 几何 / 暗系)— 无需用户上传即可一键应用 */
+export const BACKGROUND_PRESETS: BackgroundPreset[] = [
+  {
+    id: 'aurora-purple',
+    name: '极光紫',
+    thumb: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    dataUrl: svgToDataUrl(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice">
+        <defs>
+          <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#667eea"/>
+            <stop offset="100%" stop-color="#764ba2"/>
+          </linearGradient>
+        </defs>
+        <rect width="1920" height="1080" fill="url(#g)"/>
+      </svg>`,
+    ),
+  },
+  {
+    id: 'sunset-pink',
+    name: '日落粉',
+    thumb: 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)',
+    dataUrl: svgToDataUrl(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice">
+        <defs>
+          <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#fa709a"/>
+            <stop offset="100%" stop-color="#fee140"/>
+          </linearGradient>
+        </defs>
+        <rect width="1920" height="1080" fill="url(#g)"/>
+      </svg>`,
+    ),
+  },
+  {
+    id: 'ocean-cyan',
+    name: '深海青',
+    thumb: 'linear-gradient(135deg, #00d2ff 0%, #3a7bd5 100%)',
+    dataUrl: svgToDataUrl(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice">
+        <defs>
+          <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#00d2ff"/>
+            <stop offset="100%" stop-color="#3a7bd5"/>
+          </linearGradient>
+        </defs>
+        <rect width="1920" height="1080" fill="url(#g)"/>
+      </svg>`,
+    ),
+  },
+  {
+    id: 'forest-green',
+    name: '森林绿',
+    thumb: 'linear-gradient(135deg, #134e5e 0%, #71b280 100%)',
+    dataUrl: svgToDataUrl(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice">
+        <defs>
+          <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#134e5e"/>
+            <stop offset="100%" stop-color="#71b280"/>
+          </linearGradient>
+        </defs>
+        <rect width="1920" height="1080" fill="url(#g)"/>
+      </svg>`,
+    ),
+  },
+  {
+    id: 'dots-pattern',
+    name: '点阵底纹',
+    thumb: 'radial-gradient(circle at center, #4a5568 1px, transparent 1px), #1a202c',
+    dataUrl: svgToDataUrl(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80">
+        <rect width="80" height="80" fill="#1a202c"/>
+        <circle cx="40" cy="40" r="2" fill="#4a5568"/>
+        <circle cx="0" cy="0" r="2" fill="#4a5568"/>
+        <circle cx="80" cy="0" r="2" fill="#4a5568"/>
+        <circle cx="0" cy="80" r="2" fill="#4a5568"/>
+        <circle cx="80" cy="80" r="2" fill="#4a5568"/>
+      </svg>`,
+    ),
+  },
+  {
+    id: 'midnight-solid',
+    name: '午夜蓝',
+    thumb: '#0f172a',
+    dataUrl: svgToDataUrl(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice">
+        <rect width="1920" height="1080" fill="#0f172a"/>
+      </svg>`,
+    ),
+  },
+];
+
 /**
  * 把 File 转成 base64 data URL(用于上传 logo / 背景图)。
  *

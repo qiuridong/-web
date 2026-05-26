@@ -331,6 +331,98 @@ export function AppLayout() {
     }
   }, [app.site_title]);
 
+  // favicon 自动从 logo 生成(浏览器 tab 图标也跟随品牌)
+  // logo 图存在 → canvas 缩放成 64×64 PNG
+  // 否则 → canvas 画文字 + 主题色背景(从 localStorage palette hex 取,fallback 默认色)
+  useEffect(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const applyToFavicon = () => {
+      const dataUrl = canvas.toDataURL('image/png');
+      let link = document.querySelector(
+        'link[rel="icon"]',
+      ) as HTMLLinkElement | null;
+      if (!link) {
+        link = document.createElement('link');
+        link.rel = 'icon';
+        document.head.appendChild(link);
+      }
+      link.type = 'image/png';
+      link.href = dataUrl;
+    };
+
+    if (app.logo_image_data_url) {
+      const img = new Image();
+      img.onload = () => {
+        ctx.clearRect(0, 0, 64, 64);
+        // 圆角剪裁 + cover 绘图
+        ctx.save();
+        const r = 12;
+        ctx.beginPath();
+        ctx.moveTo(r, 0);
+        ctx.lineTo(64 - r, 0);
+        ctx.quadraticCurveTo(64, 0, 64, r);
+        ctx.lineTo(64, 64 - r);
+        ctx.quadraticCurveTo(64, 64, 64 - r, 64);
+        ctx.lineTo(r, 64);
+        ctx.quadraticCurveTo(0, 64, 0, 64 - r);
+        ctx.lineTo(0, r);
+        ctx.quadraticCurveTo(0, 0, r, 0);
+        ctx.closePath();
+        ctx.clip();
+        ctx.drawImage(img, 0, 0, 64, 64);
+        ctx.restore();
+        applyToFavicon();
+      };
+      img.onerror = () => {
+        // 加载失败 fallback 文字
+        drawTextFavicon();
+      };
+      img.src = app.logo_image_data_url;
+    } else {
+      drawTextFavicon();
+    }
+
+    function drawTextFavicon() {
+      if (!ctx) return;
+      // 主题色(从 localStorage 取自定义色,fallback indigo)
+      let primary = '#5865F2';
+      try {
+        primary = localStorage.getItem('signin-panel-palette-hex') || primary;
+      } catch {
+        // ignore
+      }
+      ctx.clearRect(0, 0, 64, 64);
+      // 圆角背景
+      ctx.fillStyle = primary;
+      const r = 12;
+      ctx.beginPath();
+      ctx.moveTo(r, 0);
+      ctx.lineTo(64 - r, 0);
+      ctx.quadraticCurveTo(64, 0, 64, r);
+      ctx.lineTo(64, 64 - r);
+      ctx.quadraticCurveTo(64, 64, 64 - r, 64);
+      ctx.lineTo(r, 64);
+      ctx.quadraticCurveTo(0, 64, 0, 64 - r);
+      ctx.lineTo(0, r);
+      ctx.quadraticCurveTo(0, 0, r, 0);
+      ctx.closePath();
+      ctx.fill();
+      // 文字(用 sidebar_logo_text,1-2 字)
+      const text = (app.sidebar_logo_text || '签').slice(0, 2);
+      ctx.fillStyle = '#fff';
+      ctx.font = text.length === 1 ? 'bold 44px system-ui, sans-serif' : 'bold 28px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, 32, 36);
+      applyToFavicon();
+    }
+  }, [app.logo_image_data_url, app.sidebar_logo_text]);
+
   // 401 → /login
   useEffect(() => {
     function handler() {
@@ -355,14 +447,20 @@ export function AppLayout() {
       }
     : {};
 
-  // 背景图模糊覆盖层 + opacity 暗罩(用 ::before pseudo 不行,用 overlay div)
+  // 浅深色 overlay 颜色区分:浅色主题用白罩(避免背景图把内容压暗),
+  // 深色主题用黑罩(避免背景图太亮刺眼);system 看 prefers-color-scheme
+  const { resolvedTheme } = useTheme();
+  const overlayRGB =
+    resolvedTheme === 'light' ? '255, 255, 255' : '0, 0, 0';
+
+  // 背景图模糊覆盖层 + opacity 罩(用 ::before pseudo 不行,用 overlay div)
   const backgroundOverlayStyle: React.CSSProperties = hasBackground
     ? {
         position: 'absolute',
         inset: 0,
         pointerEvents: 'none',
-        // opacity=1 → 全透明(完全看清背景图),opacity=0 → 全黑遮罩(完全隐藏背景图)
-        backgroundColor: `rgba(0, 0, 0, ${1 - Math.max(0, Math.min(1, app.background_opacity))})`,
+        // opacity=1 → 全透明(完全看清背景图),opacity=0 → 全色遮罩(完全隐藏背景图)
+        backgroundColor: `rgba(${overlayRGB}, ${1 - Math.max(0, Math.min(1, app.background_opacity))})`,
         backdropFilter: app.background_blur > 0 ? `blur(${app.background_blur}px)` : undefined,
         WebkitBackdropFilter: app.background_blur > 0 ? `blur(${app.background_blur}px)` : undefined,
       }

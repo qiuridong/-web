@@ -66,6 +66,7 @@ import PageHeader from '@/components/common/PageHeader';
 
 import { useCurrentUser, useLogout } from '@/api/hooks/auth';
 import {
+  BACKGROUND_PRESETS,
   DEFAULT_APPEARANCE,
   fileToDataUrl,
   useAppearance,
@@ -733,8 +734,46 @@ function BrandingCard() {
 
           {/* 右列:背景图设置 */}
           <div className="space-y-3.5">
+            {/* 预设背景快捷选择(无需上传) */}
             <div className="space-y-1.5">
-              <Label className="text-xs">背景图(可选,全局应用)</Label>
+              <Label className="text-xs">快捷预设(一键应用,无需上传)</Label>
+              <div className="grid grid-cols-6 gap-1.5">
+                {BACKGROUND_PRESETS.map((p) => {
+                  const selected = draft.background_image_data_url === p.dataUrl;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() =>
+                        setDraft((d) => ({
+                          ...d,
+                          background_image_data_url: p.dataUrl,
+                        }))
+                      }
+                      title={p.name}
+                      className={cn(
+                        'group relative aspect-square overflow-hidden rounded-md border-2 transition-all',
+                        selected
+                          ? 'border-primary ring-2 ring-primary/30'
+                          : 'border-border hover:border-primary/50',
+                      )}
+                      style={{ background: p.thumb }}
+                    >
+                      {selected ? (
+                        <span className="absolute inset-0 flex items-center justify-center bg-black/30">
+                          <span className="text-[10px] font-bold text-white">
+                            ✓
+                          </span>
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs">或上传自定义背景图</Label>
               <div className="flex items-center gap-3">
                 <div className="flex h-16 w-24 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-muted">
                   {draft.background_image_data_url ? (
