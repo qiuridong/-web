@@ -225,8 +225,10 @@ export function DataTable<TData, TValue>({
         </div>
       ) : null}
 
-      {/* 表格 */}
+      {/* 表格 — 外层保留 rounded-xl + overflow-hidden 给 border-radius,
+            内层 overflow-x-auto 让 mobile 列多时可横滚 */}
       <div className="overflow-hidden rounded-xl border border-border bg-card shadow-xs">
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((hg) => (
@@ -316,6 +318,7 @@ export function DataTable<TData, TValue>({
             )}
           </TableBody>
         </Table>
+        </div>
       </div>
 
       {/* 分页栏 — 仅当数据 > 0 或在服务端模式下显示 */}

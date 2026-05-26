@@ -21,7 +21,7 @@
  *   - 折叠状态由 useUIStore.sidebarCollapsed 控制,persist 到 localStorage
  *   - 折叠态(64px)只显图标,hover 弹 Tooltip 显示文字
  */
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Outlet, useLocation, useNavigate, NavLink } from 'react-router';
 import {
   LayoutDashboard,
@@ -30,6 +30,7 @@ import {
   Bell,
   Settings,
   LogOut,
+  Menu,
   User as UserIcon,
   Sun,
   Moon,
@@ -51,6 +52,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Sheet, SheetContent } from '@/components/ui/sheet';
 import {
   Tooltip,
   TooltipContent,
@@ -298,6 +300,14 @@ export function AppLayout() {
   const location = useLocation();
   const navigate = useNavigate();
 
+  // mobile sidebar 抽屉状态(< md 时启用,desktop 始终用 inline grid sidebar)
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  // 路由切换时自动关 mobile sidebar(用户点导航后不需要手动关)
+  useEffect(() => {
+    setMobileSidebarOpen(false);
+  }, [location.pathname]);
+
   // 401 → /login
   useEffect(() => {
     function handler() {
@@ -313,28 +323,60 @@ export function AppLayout() {
   return (
     <TooltipProvider delayDuration={300}>
       <div
-        className="grid h-screen w-full overflow-hidden bg-background"
-        // CSS Grid 2 列;sidebar 列宽动态,main 列 1fr 自动占剩余 — 任何 viewport 都自动响应
+        className={cn(
+          'flex h-screen w-full overflow-hidden bg-background',
+          // < md: 纯 flex(sidebar 不参与 grid,改 mobile Sheet);
+          // >= md: CSS Grid 2 列(sidebar 列宽动态,main 列 1fr)
+          'md:grid',
+        )}
         style={{
           gridTemplateColumns: `${sidebarWidth}px 1fr`,
           transition: 'grid-template-columns 200ms ease',
         }}
       >
-        <Sidebar
-          collapsed={sidebarCollapsed}
-          onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
-        />
+        {/* Desktop sidebar — md+ 直接渲染在 grid 第 1 列 */}
+        <div className="hidden md:block">
+          <Sidebar
+            collapsed={sidebarCollapsed}
+            onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+          />
+        </div>
+
+        {/* Mobile sidebar — < md 用 Sheet 抽屉,从左边滑入,backdrop 点击关 */}
+        <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
+          <SheetContent
+            side="left"
+            className="w-[260px] border-r-0 p-0 md:hidden"
+          >
+            {/* mobile 上 sidebar 始终展开态(不折叠),点 logo 关闭抽屉 */}
+            <Sidebar
+              collapsed={false}
+              onToggle={() => setMobileSidebarOpen(false)}
+            />
+          </SheetContent>
+        </Sheet>
 
         {/* 主区(顶栏 + Outlet),纵向 flex 让顶栏 sticky 在自己内部 */}
-        <div className="flex min-w-0 flex-col overflow-hidden">
-          {/* Topbar — 折叠 toggle 已合并到 sidebar 品牌区(点 logo/标题即可),这里去掉重复按钮 */}
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          {/* Topbar — mobile 加汉堡按钮在左,desktop 隐藏(直接显搜索) */}
           <header
             className={cn(
               'sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b border-border',
               'bg-background/70 backdrop-blur-md',
-              'px-4 sm:px-6',
+              'px-3 sm:px-4 lg:px-6',
             )}
           >
+            {/* 汉堡按钮 — 仅 mobile 可见 */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-9 shrink-0 md:hidden"
+              onClick={() => setMobileSidebarOpen(true)}
+              aria-label="打开侧栏"
+            >
+              <Menu size={18} strokeWidth={1.75} />
+            </Button>
+
             {/* 全局搜索 / ⌘K */}
             <button
               type="button"
@@ -348,8 +390,11 @@ export function AppLayout() {
               aria-label="打开命令面板"
               title="⌘K 命令面板"
             >
-              <Search size={14} strokeWidth={1.75} />
-              <span className="flex-1 text-left truncate">搜索 / 跳转 / 命令…</span>
+              <Search size={14} strokeWidth={1.75} className="shrink-0" />
+              <span className="flex-1 truncate text-left">
+                <span className="hidden sm:inline">搜索 / 跳转 / 命令…</span>
+                <span className="sm:hidden">搜索</span>
+              </span>
               <kbd className="hidden rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground sm:inline">
                 ⌘K
               </kbd>
@@ -361,9 +406,9 @@ export function AppLayout() {
             </div>
           </header>
 
-          {/* 主区滚动容器 */}
+          {/* 主区滚动容器 — mobile 紧凑 padding,desktop 宽松 */}
           <main className="flex-1 overflow-auto">
-            <div className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8">
+            <div className="mx-auto w-full max-w-[1440px] px-3 py-4 sm:px-6 sm:py-6 lg:px-8">
               <Outlet />
             </div>
           </main>
