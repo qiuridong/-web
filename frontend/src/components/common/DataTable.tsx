@@ -226,9 +226,13 @@ export function DataTable<TData, TValue>({
       ) : null}
 
       {/* 表格 — 外层保留 rounded-xl + overflow-hidden 给 border-radius,
-            内层 overflow-x-auto 让 mobile 列多时可横滚 */}
+            内层 overflow-auto 让 mobile 列多时可横滚 + 大 pageSize 时可纵滚
+            🟢 LOW · code-review #14:改 overflow-x-auto → overflow-auto
+            外层 overflow-hidden 只 clip border-radius;若 pageSize 高 + DataTable
+            放进 fixed-height 容器,外层裁会丢底行 → 内层接管 y 才安全。
+            对小 pageSize(默认 10)+ 无 fixed-height 容器场景行为不变(无副作用) */}
       <div className="overflow-hidden rounded-xl border border-border bg-card shadow-xs">
-        <div className="overflow-x-auto">
+        <div className="overflow-auto">
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((hg) => (

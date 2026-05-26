@@ -341,10 +341,23 @@ export function AppLayout() {
     }
   }, [app.site_title]);
 
-  // favicon 自动从 logo 生成(浏览器 tab 图标也跟随品牌)— PR #8
-  // logo 图存在 → canvas 缩放成 64×64 PNG
-  // 否则 → canvas 画文字 + 主题色背景(从 localStorage palette hex 取,fallback 默认色)
+  // favicon 自动从 logo 生成 — PR #8
+  // 🟡 MED · code-review #7+#8+#9 修复:
+  // - #7 加 palette 改色监听(自定义事件)→ 改主题色后 favicon 重绘
+  // - #8 cleanup: cancel flag 防 img.onload 在 effect rerun 后覆盖新 favicon
+  // - #9 querySelectorAll 全替换 link[rel*="icon"](含 apple-touch-icon / shortcut),
+  //      iOS 主屏 / 旧浏览器收藏夹也同步
+  const [paletteVersion, setPaletteVersion] = useState(0);
   useEffect(() => {
+    function onPaletteChanged() {
+      setPaletteVersion((v) => v + 1);
+    }
+    window.addEventListener('palette:changed', onPaletteChanged);
+    return () => window.removeEventListener('palette:changed', onPaletteChanged);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
     const canvas = document.createElement('canvas');
     canvas.width = 64;
     canvas.height = 64;
@@ -352,22 +365,30 @@ export function AppLayout() {
     if (!ctx) return;
 
     const applyToFavicon = () => {
+      if (cancelled) return;
       const dataUrl = canvas.toDataURL('image/png');
-      let link = document.querySelector(
-        'link[rel="icon"]',
-      ) as HTMLLinkElement | null;
-      if (!link) {
-        link = document.createElement('link');
+      // 全替换所有 link[rel] 含 icon 的(icon / shortcut icon / apple-touch-icon)
+      const links = document.querySelectorAll<HTMLLinkElement>(
+        'link[rel="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"]',
+      );
+      if (links.length === 0) {
+        const link = document.createElement('link');
         link.rel = 'icon';
+        link.type = 'image/png';
+        link.href = dataUrl;
         document.head.appendChild(link);
+      } else {
+        links.forEach((link) => {
+          link.type = 'image/png';
+          link.href = dataUrl;
+        });
       }
-      link.type = 'image/png';
-      link.href = dataUrl;
     };
 
     if (app.logo_image_data_url) {
       const img = new Image();
       img.onload = () => {
+        if (cancelled) return;
         ctx.clearRect(0, 0, 64, 64);
         // 圆角剪裁 + cover 绘图
         ctx.save();
@@ -431,7 +452,13 @@ export function AppLayout() {
       ctx.fillText(text, 32, 36);
       applyToFavicon();
     }
-  }, [app.logo_image_data_url, app.sidebar_logo_text]);
+
+    // cleanup:effect rerun 或 unmount 时 set cancel flag,
+    // 已 in-flight 的 img.onload 检查 cancelled 跳过 applyToFavicon
+    return () => {
+      cancelled = true;
+    };
+  }, [app.logo_image_data_url, app.sidebar_logo_text, paletteVersion]);
 
   // 401 → /login
   useEffect(() => {
@@ -461,11 +488,23 @@ export function AppLayout() {
       }
     : {};
 
-  // 浅深色 overlay 颜色区分:浅色主题用白罩(避免背景图把内容压暗),
-  // 深色主题用黑罩(避免背景图太亮刺眼);system 看 prefers-color-scheme
+  // 浅深色 overlay 颜色区分:浅色主题用白罩 / 深色主题用黑罩
+  // 🟢 LOW · code-review #15:resolvedTheme 首次 mount 是 undefined(next-themes
+  // 避免 hydration mismatch)。**反转默认到 light/白罩** — 浅色用户首屏不闪烁;
+  // 深色用户首帧白罩 1 帧再变黑罩(深色背景图通常已经偏暗,白罩 1 帧不太刺眼)
   const { resolvedTheme } = useTheme();
   const overlayRGB =
-    resolvedTheme === 'light' ? '255, 255, 255' : '0, 0, 0';
+    resolvedTheme === 'dark' ? '0, 0, 0' : '255, 255, 255';
+
+  // 🟡 MED · code-review #12:NaN clamp 失效兜底
+  // Math.max(0, Math.min(1, NaN)) = NaN → rgba(...,NaN) invalid CSS → 浏览器忽略
+  // 用户改 devtools / 后端 validator 绕过 / fetchAppearance 兜底失效都可能传 NaN
+  const safeOpacity = Number.isFinite(app.background_opacity)
+    ? Math.max(0, Math.min(1, app.background_opacity))
+    : 0.3;
+  const safeBlur = Number.isFinite(app.background_blur)
+    ? Math.max(0, Math.min(40, app.background_blur))
+    : 0;
 
   // 背景图模糊覆盖层 + opacity 罩 — absolute inset: 0 相对 min-h-full 包装,
   // 跟 scroll content 等高,滚动到底部仍被覆盖
@@ -475,11 +514,24 @@ export function AppLayout() {
         inset: 0,
         pointerEvents: 'none',
         // opacity=1 → 全透明(完全看清背景图),opacity=0 → 全色遮罩(完全隐藏背景图)
-        backgroundColor: `rgba(${overlayRGB}, ${1 - Math.max(0, Math.min(1, app.background_opacity))})`,
-        backdropFilter: app.background_blur > 0 ? `blur(${app.background_blur}px)` : undefined,
-        WebkitBackdropFilter: app.background_blur > 0 ? `blur(${app.background_blur}px)` : undefined,
+        backgroundColor: `rgba(${overlayRGB}, ${1 - safeOpacity})`,
+        backdropFilter: safeBlur > 0 ? `blur(${safeBlur}px)` : undefined,
+        WebkitBackdropFilter: safeBlur > 0 ? `blur(${safeBlur}px)` : undefined,
       }
     : {};
+
+  // 🟢 LOW · code-review #13:resize 到 md+ 时关闭 mobile Sheet
+  // Sheet 用 md:hidden 控制内容显隐,但组件本身始终挂载。mobileSidebarOpen=true
+  // 时 resize 到 desktop,Radix 在 display:none 元素 trap focus → 键盘 Tab 锁死,
+  // a11y screen reader 念诵异常。
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(min-width: 768px)');
+    function onChange(e: MediaQueryListEvent) {
+      if (e.matches) setMobileSidebarOpen(false);
+    }
+    mediaQuery.addEventListener('change', onChange);
+    return () => mediaQuery.removeEventListener('change', onChange);
+  }, []);
 
   return (
     <TooltipProvider delayDuration={300}>

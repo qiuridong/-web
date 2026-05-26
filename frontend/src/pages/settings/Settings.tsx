@@ -394,6 +394,9 @@ function AppearancePanel() {
       // ignore quota
     }
     applyHexPalette(next);
+    // 🟡 MED · code-review #7:dispatch 给 AppLayout favicon useEffect 重绘
+    // 文字 logo 模式下 favicon 用主题色 hex 渲染背景,改色应同步
+    window.dispatchEvent(new CustomEvent('palette:changed'));
   }
 
   function chooseSwatch(swatchHex: string) {
@@ -543,9 +546,17 @@ function BrandingCard() {
   const [logoUploading, setLogoUploading] = useState(false);
   const [bgUploading, setBgUploading] = useState(false);
 
-  // remote 拿到后同步到 draft(只在初次加载或 remote 更新时)
+  // 🔴 HIGH · code-review #1:dirty 守卫防止 remote 更新覆盖用户未保存改动
+  // 之前 `if (remote) setDraft(remote)`,任何 remote 引用变化(setQueryData /
+  // refetch / 其他 component 触发 mutation 后 cache 更新)都会冲掉 draft,
+  // 用户已上传的几 MB 图 + 输入瞬间丢失。
+  // 用 ref 哨兵只在首次 mount + remote 到达时同步。
+  const remoteInitedRef = useRef(false);
   useEffect(() => {
-    if (remote) setDraft(remote);
+    if (remote && !remoteInitedRef.current) {
+      setDraft(remote);
+      remoteInitedRef.current = true;
+    }
   }, [remote]);
 
   const logoFileRef = useRef<HTMLInputElement | null>(null);
@@ -594,12 +605,34 @@ function BrandingCard() {
     update.mutate(draft);
   }
 
+  // 🟡 MED · code-review #10:加 AlertDialog 二确,防止误点清空用户几 MB 数据
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
+
   function handleReset() {
-    setDraft(DEFAULT_APPEARANCE);
-    update.mutate(DEFAULT_APPEARANCE);
+    setResetConfirmOpen(true);
   }
 
-  const dirty = !!remote && JSON.stringify(draft) !== JSON.stringify(remote);
+  function confirmReset() {
+    setDraft(DEFAULT_APPEARANCE);
+    update.mutate(DEFAULT_APPEARANCE);
+    setResetConfirmOpen(false);
+  }
+
+  // 🟢 LOW · code-review #14 修一并:dirty 比较用 deepEqual 思路代替 JSON.stringify
+  // 浮点 slider step 0.05 累积误差 (0.3000000004) 会误报 dirty。简单 deepEqual:
+  function appearanceEqual(a: AppearanceData, b: AppearanceData): boolean {
+    if (a.site_title !== b.site_title) return false;
+    if (a.site_subtitle !== b.site_subtitle) return false;
+    if (a.sidebar_logo_text !== b.sidebar_logo_text) return false;
+    if (a.logo_image_data_url !== b.logo_image_data_url) return false;
+    if (a.background_image_data_url !== b.background_image_data_url) return false;
+    if (a.background_blend_mode !== b.background_blend_mode) return false;
+    // 数值字段用 abs diff 防浮点累积
+    if (Math.abs(a.background_blur - b.background_blur) > 0.5) return false;
+    if (Math.abs(a.background_opacity - b.background_opacity) > 0.005) return false;
+    return true;
+  }
+  const dirty = !!remote && !appearanceEqual(draft, remote);
 
   return (
     <Card className="p-6">
@@ -931,6 +964,50 @@ function BrandingCard() {
           <p className="ml-auto text-[11px] text-muted-foreground">设置生效全站</p>
         )}
       </div>
+
+      {/* 🟡 MED · code-review #10:Reset 二确,防止误点丢用户几 MB 图 */}
+      <AlertDialog
+        open={resetConfirmOpen}
+        onOpenChange={(o) => !o && setResetConfirmOpen(false)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <TriangleAlert
+                className="size-5 text-danger"
+                strokeWidth={1.75}
+              />
+              确认恢复外观默认?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              将清空当前所有外观设置(网站标题、Logo 文本、Logo 图、背景图、
+              透明度/模糊/混合模式),恢复到系统默认值。
+              <strong className="ml-1 text-danger">
+                已上传的 Logo / 背景图(可能几 MB)会立即丢失,无法恢复
+              </strong>
+              。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={update.isPending}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-danger text-danger-foreground hover:bg-danger/90"
+              disabled={update.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                confirmReset();
+              }}
+            >
+              {update.isPending ? (
+                <Loader2 className="mr-1.5 size-4 animate-spin" strokeWidth={1.75} />
+              ) : (
+                <RotateCcw className="mr-1.5 size-4" strokeWidth={1.75} />
+              )}
+              确认恢复
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }

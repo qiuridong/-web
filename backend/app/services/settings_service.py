@@ -16,6 +16,7 @@
 """
 from __future__ import annotations
 
+import copy
 import json
 import threading
 from typing import Any
@@ -162,6 +163,14 @@ def _validate_appearance(v: object) -> bool:
                 return False
             if len(val) > max_len:
                 return False
+    # 🔴 HIGH · code-review #3:logo / 背景图必须是 data:image/ 前缀,防 XSS
+    # 攻击场景:管理员账号被盗,恶意设 logo='data:text/html,<script>...</script>',
+    # 用户右键图片新 tab 打开会渲染 HTML → XSS。也防 javascript: URI scheme。
+    for img_key in ("logo_image_data_url", "background_image_data_url"):
+        if img_key in v:
+            url = v[img_key]
+            if url and not url.startswith("data:image/"):
+                return False
     # blend_mode 合法值(CSS background-blend-mode)
     if "background_blend_mode" in v:
         bm = str(v["background_blend_mode"]).lower()
@@ -247,8 +256,11 @@ def get(db: Session, key: str, default: Any = _SENTINEL) -> Any:
         return value
 
     # 不在 DB,fallback 默认表
+    # 🔴 HIGH · code-review #4:deepcopy 防 mutate 污染模块级共享 dict
+    # 若调用方对返回值做 d['site_title']='x',会永久污染 DEFAULT_SETTINGS + _cache
     if key in DEFAULT_SETTINGS:
-        value = DEFAULT_SETTINGS[key]["default"]
+        raw = DEFAULT_SETTINGS[key]["default"]
+        value = copy.deepcopy(raw) if isinstance(raw, (dict, list)) else raw
         _cache_set(key, value)
         return value
 
