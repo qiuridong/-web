@@ -38,9 +38,11 @@ const sheetVariants = cva(
         top: "inset-x-0 top-0 border-b data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top",
         bottom:
           "inset-x-0 bottom-0 border-t data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
-        left: "inset-y-0 left-0 h-full w-[calc(100vw-1rem)] border-r data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left sm:w-3/4 sm:max-w-sm",
+        // 🟡 MED · code-review #11:mobile 留 3rem(48px) backdrop 让用户能点关
+        // 之前 calc(100vw-1rem) 只留 16px,低于 iOS/Android 44px 触控目标
+        left: "inset-y-0 left-0 h-full w-[min(calc(100vw-3rem),24rem)] border-r data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left sm:w-3/4 sm:max-w-sm",
         right:
-          "inset-y-0 right-0 h-full w-[calc(100vw-1rem)]  border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:w-3/4 sm:max-w-sm",
+          "inset-y-0 right-0 h-full w-[min(calc(100vw-3rem),24rem)]  border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:w-3/4 sm:max-w-sm",
       },
     },
     defaultVariants: {

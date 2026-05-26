@@ -19,6 +19,7 @@
  * - background_opacity → main background overlay alpha
  * - background_blend_mode → CSS background-blend-mode
  */
+import { useEffect } from 'react';
 import {
   useMutation,
   useQuery,
@@ -82,9 +83,22 @@ async function fetchAppearance(signal?: AbortSignal): Promise<AppearanceData> {
     });
   }
   const raw = (data ?? { value: null }) as SettingValue;
+
+  // 🔴 HIGH · code-review #2:防御性 — 若 backend 返 value 是 JSON 字符串
+  // (理论上不应该,但某些端点未解析 value_json),先 JSON.parse 一次
+  // 之前 typeof !== 'object' 会静默回退 DEFAULT,所有保存设置丢失
+  let rawValue: unknown = raw.value;
+  if (typeof rawValue === 'string') {
+    try {
+      rawValue = JSON.parse(rawValue);
+    } catch {
+      rawValue = null;
+    }
+  }
+
   const partial =
-    raw.value && typeof raw.value === 'object'
-      ? (raw.value as Partial<AppearanceData>)
+    rawValue && typeof rawValue === 'object' && !Array.isArray(rawValue)
+      ? (rawValue as Partial<AppearanceData>)
       : {};
   // 用默认值兜底缺失字段(向后兼容老 setting 没新字段)
   return { ...DEFAULT_APPEARANCE, ...partial };
@@ -112,13 +126,48 @@ export const appearanceQueryKeys = {
 
 // ====================== Hooks ======================
 
+// 🟡 MED · code-review #6:跨 tab 同步 appearance
+// BroadcastChannel 让多个 tab 共享 mutation 结果 — tab A 改设置 → broadcast →
+// tab B 收到立即 setQueryData 更新,不需要手动 reload。
+// 优雅降级:不支持 BroadcastChannel 的浏览器(老 Safari)走 localStorage event。
+const APPEARANCE_CHANNEL = 'signin-panel:appearance';
+let bc: BroadcastChannel | null = null;
+function getBroadcast(): BroadcastChannel | null {
+  if (typeof BroadcastChannel === 'undefined') return null;
+  if (!bc) {
+    try {
+      bc = new BroadcastChannel(APPEARANCE_CHANNEL);
+    } catch {
+      bc = null;
+    }
+  }
+  return bc;
+}
+
 /**
  * 读取当前 appearance 设置。
  *
  * `staleTime: Infinity` — 这是站点级配置,改动罕见 + invalidate by mutation,
  * 避免每次组件 mount 都重 fetch(2 张图 base64 可能几百 KB)。
+ *
+ * 跨 tab 同步:用 BroadcastChannel 监听其他 tab 的 mutation,自动 setQueryData。
  */
 export function useAppearance(): UseQueryResult<AppearanceData, Error> {
+  const qc = useQueryClient();
+
+  // 监听其他 tab 的 mutation broadcast
+  useEffect(() => {
+    const channel = getBroadcast();
+    if (!channel) return;
+    function onMessage(e: MessageEvent) {
+      if (e.data && typeof e.data === 'object' && e.data.type === 'appearance:updated') {
+        qc.setQueryData(appearanceQueryKeys.current, e.data.payload);
+      }
+    }
+    channel.addEventListener('message', onMessage);
+    return () => channel.removeEventListener('message', onMessage);
+  }, [qc]);
+
   return useQuery({
     queryKey: appearanceQueryKeys.current,
     queryFn: ({ signal }) => fetchAppearance(signal),
@@ -138,6 +187,15 @@ export function useUpdateAppearance(): UseMutationResult<
     mutationFn: putAppearance,
     onSuccess: (data) => {
       qc.setQueryData(appearanceQueryKeys.current, data);
+      // 🟡 MED · code-review #6:broadcast 让其他 tab 也更新
+      const channel = getBroadcast();
+      if (channel) {
+        try {
+          channel.postMessage({ type: 'appearance:updated', payload: data });
+        } catch {
+          // ignore — BroadcastChannel postMessage 偶发失败不阻塞主流程
+        }
+      }
       toast.success('外观设置已保存');
     },
     onError: (err) => {
