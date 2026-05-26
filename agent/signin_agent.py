@@ -27,14 +27,18 @@ systemd 部署见 ``install.sh``。
 from __future__ import annotations
 
 import argparse
+import hashlib
+import io
 import json
 import logging
 import os
+import shutil
 import signal
 import subprocess
 import sys
 import threading
 import time
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -78,6 +82,16 @@ STDOUT_BATCH_MAX_LINES = 50
 
 # 子进程最大 timeout(从 task.timeout_sec 拿,这里是 fallback)
 TASK_TIMEOUT_FALLBACK_SEC = 600
+
+# MVP-2 · Bundle 同步
+# 本地脚本目录里的版本 marker 文件名(存远端 bundle_sha256)
+BUNDLE_MARKER_FILE = ".bundle_sha256"
+# 拉 bundle.zip HTTP 超时(主面板 < 1MiB,60s 充足)
+BUNDLE_FETCH_TIMEOUT_SEC = 60
+# bundle 单个文件上限(防恶意 zip)— 与 backend MAX_FILE_BYTES 对齐 256 KiB
+BUNDLE_FILE_MAX_BYTES = 256 * 1024
+# bundle 总未压缩上限 — 与 backend MAX_ZIP_TOTAL_BYTES 对齐 1 MiB
+BUNDLE_TOTAL_MAX_BYTES = 1 * 1024 * 1024
 
 
 # ============================================================
@@ -380,6 +394,204 @@ class Agent:
         )
 
     # ----------------------------------------------------------
+    # MVP-2 · 同步脚本 bundle(从主面板 Pull)
+    # ----------------------------------------------------------
+    def _ensure_script_synced(self, script_slug: str) -> None:
+        """确保本地 ``scripts_dir/<slug>/`` 与主面板一致(按需同步)。
+
+        流程:
+        1. GET /api/v1/agent/scripts/<slug>/manifest → 拿 ``bundle_sha256``
+        2. 比对本地 ``.bundle_sha256`` marker:一致 + main.py 存在 → return
+        3. GET /api/v1/agent/scripts/<slug>/bundle.zip → 校验 sha256
+        4. 解压到 tmp → 原子 ``os.replace`` 到 ``scripts_dir/<slug>/``
+        5. 写新 ``.bundle_sha256`` marker
+
+        失败时**只 log 不抛**,让 _execute 后续的 "main.py 不存在" 检查兜底报错。
+
+        :raises RuntimeError: bundle sha256 校验失败 / zip slip 攻击(此时主动抛,
+            因为主面板的 bundle 不可信 = 系统出大问题,不该继续跑)
+        """
+        script_dir = self.config.scripts_dir / script_slug
+        marker_path = script_dir / BUNDLE_MARKER_FILE
+
+        # 步 1: 拉 manifest
+        try:
+            r = self.client.get(
+                f"/api/v1/agent/scripts/{script_slug}/manifest",
+                timeout=15,
+            )
+            r.raise_for_status()
+            manifest = r.json()
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                self.logger.warning(
+                    f"主面板没有脚本 {script_slug!r}(404),跳过同步"
+                )
+            else:
+                self.logger.warning(
+                    f"拉 manifest 失败 slug={script_slug} HTTP {exc.response.status_code}:"
+                    f" {exc.response.text[:200]}"
+                )
+            return
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning(
+                f"拉 manifest 网络错误 slug={script_slug}: {exc}"
+            )
+            return
+
+        remote_sha = str(manifest.get("bundle_sha256") or "")
+        remote_size = int(manifest.get("bundle_size") or 0)
+        if not remote_sha:
+            self.logger.warning(
+                f"manifest 缺 bundle_sha256,跳过同步 slug={script_slug}"
+            )
+            return
+
+        # 步 2: 比对本地 marker
+        local_sha = ""
+        if marker_path.is_file():
+            try:
+                local_sha = marker_path.read_text(encoding="utf-8").strip()
+            except OSError:
+                pass
+
+        if local_sha == remote_sha and (script_dir / "main.py").is_file():
+            self.logger.debug(
+                f"脚本已最新 slug={script_slug} sha={remote_sha[:12]}"
+            )
+            return
+
+        # 步 3: 拉 bundle.zip
+        self.logger.info(
+            f"⤓ 同步脚本 {script_slug}: local={local_sha[:12] or '(无)'} → "
+            f"remote={remote_sha[:12]} ({remote_size} bytes)"
+        )
+        try:
+            r = self.client.get(
+                f"/api/v1/agent/scripts/{script_slug}/bundle.zip",
+                timeout=BUNDLE_FETCH_TIMEOUT_SEC,
+            )
+            r.raise_for_status()
+            bundle_bytes = r.content
+        except Exception as exc:  # noqa: BLE001
+            self.logger.error(f"拉取 bundle 失败 slug={script_slug}: {exc}")
+            return
+
+        if len(bundle_bytes) > BUNDLE_TOTAL_MAX_BYTES:
+            self.logger.error(
+                f"bundle 超过本地上限 {BUNDLE_TOTAL_MAX_BYTES} 字节"
+                f" slug={script_slug} size={len(bundle_bytes)}"
+            )
+            return
+
+        # 步 4: 校验 sha256
+        actual_sha = hashlib.sha256(bundle_bytes).hexdigest()
+        if actual_sha != remote_sha:
+            raise RuntimeError(
+                f"bundle sha256 不匹配 slug={script_slug} "
+                f"expected={remote_sha[:16]} actual={actual_sha[:16]}"
+            )
+
+        # 步 5: 原子解压
+        self.config.scripts_dir.mkdir(parents=True, exist_ok=True)
+        tmp_dir = self.config.scripts_dir / f".tmp-{script_slug}-{int(time.time())}"
+        if tmp_dir.exists():
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        tmp_dir.mkdir()
+
+        try:
+            with zipfile.ZipFile(io.BytesIO(bundle_bytes), "r") as zf:
+                # 安全校验
+                for info in zf.infolist():
+                    name = info.filename
+                    if name.endswith("/"):
+                        continue
+                    # Zip slip 防御:绝对路径 / .. / 反斜杠
+                    normalized = name.replace("\\", "/")
+                    if normalized.startswith("/"):
+                        raise RuntimeError(
+                            f"bundle 含绝对路径条目: {name!r}"
+                        )
+                    if any(p == ".." for p in normalized.split("/")):
+                        raise RuntimeError(
+                            f"bundle 含 .. 路径段: {name!r}"
+                        )
+                    if info.file_size > BUNDLE_FILE_MAX_BYTES:
+                        raise RuntimeError(
+                            f"bundle 单文件 {name!r} {info.file_size} > 上限"
+                            f" {BUNDLE_FILE_MAX_BYTES}"
+                        )
+
+                # 解压
+                for info in zf.infolist():
+                    if info.filename.endswith("/"):
+                        continue
+                    normalized = info.filename.replace("\\", "/")
+                    target = tmp_dir / normalized
+                    # 双保险:resolve 后必须在 tmp_dir 下
+                    try:
+                        target.resolve().relative_to(tmp_dir.resolve())
+                    except ValueError:
+                        raise RuntimeError(
+                            f"解压逃出 tmp_dir: {target}"
+                        )
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    with zf.open(info, "r") as src, open(target, "wb") as dst:
+                        shutil.copyfileobj(src, dst, length=64 * 1024)
+
+            # 写 marker
+            (tmp_dir / BUNDLE_MARKER_FILE).write_text(
+                remote_sha, encoding="utf-8"
+            )
+
+            # 备份旧目录(若存在)
+            backup_dir: Path | None = None
+            if script_dir.exists():
+                backup_dir = (
+                    self.config.scripts_dir
+                    / f".backup-{script_slug}-{int(time.time())}"
+                )
+                os.replace(script_dir, backup_dir)
+
+            # 原子搬过去
+            try:
+                os.replace(tmp_dir, script_dir)
+            except OSError as exc:
+                # 回滚
+                if backup_dir is not None and backup_dir.exists():
+                    try:
+                        os.replace(backup_dir, script_dir)
+                    except OSError:
+                        self.logger.exception(
+                            f"回滚失败 backup={backup_dir} target={script_dir}"
+                        )
+                raise RuntimeError(
+                    f"原子替换失败 slug={script_slug}: {exc}"
+                ) from exc
+
+            # 成功 → 清旧备份
+            if backup_dir is not None and backup_dir.exists():
+                try:
+                    shutil.rmtree(backup_dir)
+                except OSError as exc:
+                    self.logger.warning(
+                        f"清旧备份失败(可手动 rm) {backup_dir}: {exc}"
+                    )
+
+            self.logger.info(
+                f"✓ 脚本同步完成 {script_slug} sha={remote_sha[:12]}"
+            )
+
+        except Exception:
+            # 清 tmp(只清没被 rename 走的情况)
+            if tmp_dir.exists():
+                try:
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+                except OSError:
+                    pass
+            raise
+
+    # ----------------------------------------------------------
     # 执行 task
     # ----------------------------------------------------------
     def _execute(self, task: dict[str, Any]) -> None:
@@ -393,12 +605,23 @@ class Agent:
             f"timeout={timeout_sec}s"
         )
 
-        # 检查脚本本地是否存在
+        # MVP-2 · 拉脚本(按需同步,sha256 比对一致则跳过)
+        # 失败时不抛(只 log),让下面 main.py 检查兜底报错
+        try:
+            self._ensure_script_synced(script_slug)
+        except Exception as exc:  # noqa: BLE001
+            self.logger.error(
+                f"脚本同步 raised(本次跳过同步,试用本地版本) "
+                f"slug={script_slug}: {exc}"
+            )
+
+        # 检查脚本本地是否存在(同步失败 / 主面板没此脚本时的兜底)
         script_dir = self.config.scripts_dir / script_slug
         if not (script_dir / "main.py").is_file():
             msg = (
                 f"脚本未部署到 agent 节点:{script_dir}/main.py 不存在。"
-                "请到主面板 web 上 scp / rsync 同步脚本到 agent 节点。"
+                "Pull 同步也失败 — 请到主面板 web 检查脚本是否已上传,"
+                "或手动 scp 同步过来。"
             )
             self.logger.error(msg)
             self._post_result(

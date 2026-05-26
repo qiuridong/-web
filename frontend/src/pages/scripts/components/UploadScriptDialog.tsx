@@ -22,6 +22,7 @@ import { useNavigate } from 'react-router';
 import { useDropzone } from 'react-dropzone';
 import JSZip from 'jszip';
 import yaml from 'js-yaml';
+import { toast } from 'sonner';
 import {
   AlertCircle,
   BookOpen,
@@ -32,6 +33,7 @@ import {
   FolderUp,
   Loader2,
   Package,
+  Server,
   Upload as UploadIcon,
   X,
   XCircle,
@@ -56,6 +58,7 @@ import {
   type UploadError,
   type UploadResponse,
 } from '@/api/hooks/useScriptUpload';
+import { useNodes } from '@/api/hooks/nodes';
 import { formatBytes } from '@/lib/format';
 import {
   SCRIPT_REQUIRED_FILES,
@@ -208,6 +211,20 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
   // 下载模板 loading
   const [downloadingTemplate, setDownloadingTemplate] = useState(false);
 
+  // 同步到节点(可选,可多选)— MVP 仅 UI 提示,实际同步走按需 Pull
+  const [selectedNodeIds, setSelectedNodeIds] = useState<number[]>([]);
+  const { data: nodesData } = useNodes();
+  const enabledNodes = useMemo(
+    () => (nodesData?.items ?? []).filter((n) => n.enabled),
+    [nodesData],
+  );
+
+  function toggleNodeId(id: number, checked: boolean) {
+    setSelectedNodeIds((prev) =>
+      checked ? [...prev, id] : prev.filter((x) => x !== id),
+    );
+  }
+
   // 客户端 slug 校验(留空也合法,后端会 fallback 到 manifest.yaml 里的 slug)
   const slugTrim = slug.trim();
   const slugError = useMemo(() => {
@@ -316,6 +333,7 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
     setAnalysis(null);
     setAnalyzing(false);
     setAnalyzeError(null);
+    setSelectedNodeIds([]);
     reset();
   }, [reset]);
 
@@ -347,6 +365,17 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
       });
       setResult(resp);
       setPhase('success');
+      // MVP-2 · 仅提示,不实际推送 — agent 在跑实例时自动 Pull 同步
+      if (selectedNodeIds.length > 0) {
+        const nodeNames = enabledNodes
+          .filter((n) => selectedNodeIds.includes(n.id))
+          .map((n) => n.slug)
+          .join(' / ');
+        toast.info(
+          `已上传到主面板。选中的 ${selectedNodeIds.length} 个节点(${nodeNames})会在创建/跑实例时自动 Pull 同步脚本`,
+          { duration: 8000 },
+        );
+      }
     } catch (err) {
       // 用户点取消触发 AbortError → 回到 idle,不显示错误
       if (err instanceof DOMException && err.name === 'AbortError') {
@@ -600,6 +629,66 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
                     </span>
                   </span>
                 </label>
+
+                {/* 同步到节点(可选,可多选) — MVP 仅 UI 标记 */}
+                <div className="space-y-1.5 rounded-md border border-border bg-muted/20 p-2.5">
+                  <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                    <Server className="size-3.5" strokeWidth={1.75} />
+                    同步到节点(可选,可多选)
+                  </div>
+                  {enabledNodes.length === 0 ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      暂无可用节点。可去 /nodes 创建,创建后此处自动出现。
+                    </p>
+                  ) : (
+                    <ul className="space-y-1">
+                      {enabledNodes.map((n) => (
+                        <li
+                          key={n.id}
+                          className="flex items-center gap-2 text-xs"
+                        >
+                          <Checkbox
+                            id={`upload-node-${n.id}`}
+                            checked={selectedNodeIds.includes(n.id)}
+                            onCheckedChange={(v) => toggleNodeId(n.id, !!v)}
+                            disabled={isUploading}
+                          />
+                          <label
+                            htmlFor={`upload-node-${n.id}`}
+                            className="flex flex-1 cursor-pointer items-center gap-2"
+                          >
+                            <code className="font-mono text-foreground">
+                              {n.slug}
+                            </code>
+                            {n.name ? (
+                              <span className="text-muted-foreground">
+                                · {n.name}
+                              </span>
+                            ) : null}
+                            <span className="ml-auto flex items-center gap-1.5 text-[10px]">
+                              {n.is_local ? (
+                                <span className="rounded bg-primary/10 px-1 py-0.5 text-primary">
+                                  本地
+                                </span>
+                              ) : n.online ? (
+                                <span className="rounded bg-success/10 px-1 py-0.5 text-success">
+                                  在线
+                                </span>
+                              ) : (
+                                <span className="rounded bg-warning/10 px-1 py-0.5 text-warning">
+                                  离线
+                                </span>
+                              )}
+                            </span>
+                          </label>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <p className="text-[10.5px] text-muted-foreground">
+                    本次为预提示,不会立即推送。脚本会在 <strong>首次跑实例时</strong> 由 agent 自动 Pull 同步(MVP-2,按需,免维护)。
+                  </p>
+                </div>
               </div>
 
               {/* 上传中:进度条 */}
