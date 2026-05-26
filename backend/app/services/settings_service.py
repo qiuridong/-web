@@ -110,7 +110,81 @@ DEFAULT_SETTINGS: dict[str, dict[str, Any]] = {
         "is_secret": False,
         "validator": lambda v: isinstance(v, int) and 1 <= v <= 1440,
     },
+    # ============================================================
+    # 应用外观品牌(站点标题 / Logo / 背景图)— 整个 dict 一项设置
+    # 图片走 base64 data URL 内联存(value 是 dict,经 json.dumps 后存 value_json)
+    # 单个 value_json 上限 ~3 MB(2 张图 + 文本元数据,SQLite TEXT 足够)
+    # ============================================================
+    "appearance": {
+        "default": {
+            "site_title": "签到管家",
+            "site_subtitle": "",
+            "sidebar_logo_text": "签",
+            "logo_image_data_url": "",
+            "background_image_data_url": "",
+            "background_blur": 0,
+            "background_opacity": 0.3,
+            "background_blend_mode": "normal",
+        },
+        "type": "dict",
+        "description": "应用外观品牌:站点标题 / 侧栏 logo 文本 / Logo 图(base64) / 背景图(base64) + 模糊/透明度/混合模式",
+        "is_secret": False,
+        "validator": lambda v: _validate_appearance(v),
+    },
 }
+
+
+def _validate_appearance(v: object) -> bool:
+    """appearance dict 校验。
+
+    宽松策略:
+    - 必须是 dict
+    - 各字段类型基本对(string / number / 空字符串都行)
+    - 图片 data URL 不强制 prefix 但限制总长度(单字段 < 3 MB,防 megaJSON 撑死 DB)
+    - background_blur 0-20、background_opacity 0-1、blend_mode 在合法值
+    - 允许部分字段缺失(取默认值)
+    """
+    if not isinstance(v, dict):
+        return False
+    # 字符串字段 + 长度上限
+    string_limits = {
+        "site_title": 128,
+        "site_subtitle": 128,
+        "sidebar_logo_text": 8,
+        "logo_image_data_url": 3 * 1024 * 1024,
+        "background_image_data_url": 3 * 1024 * 1024,
+        "background_blend_mode": 32,
+    }
+    for key, max_len in string_limits.items():
+        if key in v:
+            val = v[key]
+            if not isinstance(val, str):
+                return False
+            if len(val) > max_len:
+                return False
+    # blend_mode 合法值(CSS background-blend-mode)
+    if "background_blend_mode" in v:
+        bm = str(v["background_blend_mode"]).lower()
+        if bm not in {
+            "normal", "multiply", "screen", "overlay", "darken", "lighten",
+            "color-dodge", "color-burn", "hard-light", "soft-light",
+            "difference", "exclusion", "hue", "saturation", "color", "luminosity",
+        }:
+            return False
+    # 数值字段范围
+    if "background_blur" in v:
+        bb = v["background_blur"]
+        if not isinstance(bb, (int, float)) or isinstance(bb, bool):
+            return False
+        if not (0 <= float(bb) <= 40):
+            return False
+    if "background_opacity" in v:
+        bo = v["background_opacity"]
+        if not isinstance(bo, (int, float)) or isinstance(bo, bool):
+            return False
+        if not (0 <= float(bo) <= 1):
+            return False
+    return True
 
 ALLOWED_KEYS: frozenset[str] = frozenset(DEFAULT_SETTINGS.keys())
 SECRET_KEYS: frozenset[str] = frozenset(
