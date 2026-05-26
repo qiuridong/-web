@@ -435,14 +435,18 @@ export function AppLayout() {
 
   const sidebarWidth = sidebarCollapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH;
 
-  // 背景图 inline style(应用到 main 滚动容器)
+  // 背景图 inline style — 应用到 main 内部 min-h-full 包装(随 scroll content 等高,
+  // 不是 main viewport),这样滚动到底部背景仍覆盖,且 overlay 跟着一起延伸
   const hasBackground = !!app.background_image_data_url;
-  const mainStyle: React.CSSProperties = hasBackground
+  const backgroundWrapperStyle: React.CSSProperties = hasBackground
     ? {
         backgroundImage: `url("${app.background_image_data_url}")`,
         backgroundSize: 'cover',
         backgroundPosition: 'center',
         backgroundRepeat: 'no-repeat',
+        // background-attachment 用默认 'scroll' — 跟 wrapper(min-h-full)一起滚动,
+        // overlay 也跟 wrapper 一起延伸,两者始终对齐覆盖完整 scroll content
+        // (用 'fixed' 会跟 overlay 移动错位,且视觉上覆盖 sidebar)
         backgroundBlendMode: app.background_blend_mode || 'normal',
       }
     : {};
@@ -453,7 +457,8 @@ export function AppLayout() {
   const overlayRGB =
     resolvedTheme === 'light' ? '255, 255, 255' : '0, 0, 0';
 
-  // 背景图模糊覆盖层 + opacity 罩(用 ::before pseudo 不行,用 overlay div)
+  // 背景图模糊覆盖层 + opacity 罩 — absolute inset: 0 相对 min-h-full 包装,
+  // 跟 scroll content 等高,滚动到底部仍被覆盖
   const backgroundOverlayStyle: React.CSSProperties = hasBackground
     ? {
         position: 'absolute',
@@ -521,13 +526,20 @@ export function AppLayout() {
             </div>
           </header>
 
-          {/* 主区滚动容器 — 含可选背景图 + overlay(opacity 暗罩 + 模糊) */}
-          <main className="relative flex-1 overflow-auto" style={mainStyle}>
-            {hasBackground ? (
-              <div style={backgroundOverlayStyle} aria-hidden="true" />
-            ) : null}
-            <div className="relative z-[1] mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8">
-              <Outlet />
+          {/* 主区滚动容器 — main 自己只负责滚动,
+              背景图 + overlay 套在内部 min-h-full 包装(随 scroll content 等高,
+              滚动到底部都能覆盖,不会露出 raw 背景图) */}
+          <main className="flex-1 overflow-auto">
+            <div
+              className="relative min-h-full"
+              style={backgroundWrapperStyle}
+            >
+              {hasBackground ? (
+                <div style={backgroundOverlayStyle} aria-hidden="true" />
+              ) : null}
+              <div className="relative z-[1] mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8">
+                <Outlet />
+              </div>
             </div>
           </main>
         </div>
