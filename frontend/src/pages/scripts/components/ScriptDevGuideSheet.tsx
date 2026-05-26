@@ -111,6 +111,50 @@ def run(config: dict, context) -> RunResult:
             </p>
           </Section>
 
+          {/* ============ dry-run 短路(必读!踩坑最多) ============ */}
+          <Section title="🔍 dry-run 短路 · 上传前必读">
+            <Callout type="warn">
+              <strong>这是最常见的上传 422 失败原因。</strong>
+              所有需要"用户配置项"才能跑的脚本(99% 签到都是)<strong>必须</strong>在{' '}
+              <Code>run()</Code> 开头加 dry-run 短路。
+            </Callout>
+            <p>
+              <strong>平台 dry-run 是什么:</strong>
+              上传脚本时,平台用<strong>空 config + run_id=0 + instance_id=0</strong>
+              调一次你的 <Code>run()</Code>,验证它能正常加载 + 执行 + 返{' '}
+              <Code>RunResult</Code>。
+            </p>
+            <p>
+              <strong>为什么会 422:</strong>
+              sandbox_runner 的契约是:<Code>RunResult.success=False → exit_code=1</Code>。
+              如果你的 <Code>run()</Code> 一进来就因为缺 <Code>username/password</Code>
+              {' '}早 return <Code>RunResult(success=False, ...)</Code>,dry-run 退出码必然是 1,
+              平台判失败 → 上传被拒。
+            </p>
+            <p>
+              <strong>正确写法:</strong>
+              在 <Code>run()</Code> 第一行加 dry-run 短路,真实跑时 run_id/instance_id 都是正数,
+              不会走这个分支:
+            </p>
+            <Pre>{`def run(config: dict, context) -> RunResult:
+    logger = context.logger
+
+    # ⚠️ dry-run 短路 — 不要删!上传时平台用 0/0 跑一次验证脚本可加载
+    if context.run_id == 0 and context.instance_id == 0:
+        logger.info("dry-run 模式:跳过字段校验")
+        return RunResult(success=True, message="dry-run OK")
+
+    # 真实跑:正常校验配置
+    username = config.get("username") or ""
+    if not username:
+        return RunResult(success=False, message="缺少 username")
+    # ... 签到逻辑 ...`}</Pre>
+            <Callout type="info">
+              下载平台模板(添加脚本 → 📥 下载模板项目)的 <Code>main.py</Code>
+              已经写好了这段,只要不删就 OK。
+            </Callout>
+          </Section>
+
           {/* ============ context 字段 ============ */}
           <Section title="📥 context 字段">
             <Table
