@@ -1,6 +1,7 @@
-"""脚本上传 + 在线编辑业务逻辑(MVP-5)。
+"""脚本上传 + 在线编辑业务逻辑(MVP-5)+ Agent Bundle 分发(MVP-2)。
 
 详见 ``进度/设计/Web脚本编辑器.md`` § 2.4 安全模型 + § 2.2/2.3 流程。
+Bundle 分发设计稿:``进度/变更/2026-05-25-通知UI增强+脚本同步Pull方案设计.md`` § 2。
 
 公开函数
 --------
@@ -14,6 +15,7 @@
 - :func:`read_file_text`             路径安全 + UTF-8 解码
 - :func:`write_file_text`            写 tmp + 原子 replace + 备份旧版到 .backups/
 - :func:`delete_script_files`        rmtree scripts/<slug>/
+- :func:`compute_script_bundle`      MVP-2 · 打包 scripts/<slug>/ 为 zip 给 agent 拉取
 
 设计要点
 --------
@@ -23,6 +25,8 @@
 """
 from __future__ import annotations
 
+import hashlib
+import io
 import json
 import mimetypes
 import os
@@ -35,7 +39,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
-from zipfile import BadZipFile, ZipFile, ZipInfo
+from zipfile import BadZipFile, ZIP_DEFLATED, ZipFile, ZipInfo
 
 from loguru import logger
 
@@ -845,3 +849,129 @@ def delete_script_files(scripts_root: Path, slug: str) -> int:
 
     logger.info("已删脚本目录 slug={} files_removed={}", slug, file_count)
     return file_count
+
+
+# ============================================================
+# MVP-2 · Bundle 分发(供 agent 拉取脚本目录)
+# ============================================================
+#: 打 bundle 时跳过的子目录(用于 agent 同步,排除运行时产物 / 备份)
+BUNDLE_EXCLUDE_DIRS: frozenset[str] = frozenset({
+    BACKUPS_SUBDIR,         # 在线编辑备份
+    "__pycache__",          # Python 字节码缓存
+    "data",                 # 历史 / 用户数据
+    ".git",
+    "_dry_run_data",        # dry-run 产物
+    "node_modules",
+    ".pytest_cache",
+})
+
+#: 打 bundle 时跳过的文件后缀
+BUNDLE_EXCLUDE_SUFFIXES: frozenset[str] = frozenset({
+    ".pyc", ".pyo", ".pyd",
+    ".log", ".tmp",
+    ".DS_Store",
+})
+
+
+def compute_script_bundle(
+    scripts_root: Path, slug: str
+) -> tuple[bytes, str, int]:
+    """打包 ``scripts/<slug>/`` 为 zip,返回 ``(bytes, sha256_hex, size)``。
+
+    Agent 拉取流程:
+    1. agent 调 ``GET /api/v1/agent/scripts/<slug>/manifest`` 拿 ``bundle_sha256``
+    2. 比对本地 ``.bundle_sha256`` marker
+    3. 不一致 → ``GET /api/v1/agent/scripts/<slug>/bundle.zip``
+    4. agent 端校验 sha256 + 原子解压到 ``scripts_dir/<slug>/``
+
+    过滤规则(MVP-2):
+    - 跳过 :data:`BUNDLE_EXCLUDE_DIRS` 中任一段的路径(.backups / __pycache__ /
+      data / .git / _dry_run_data / node_modules / .pytest_cache)
+    - 跳过 :data:`BUNDLE_EXCLUDE_SUFFIXES` 中的后缀(.pyc / .log / .DS_Store 等)
+    - 不在缓存(每次重打):小脚本 < 50 KB,压缩 < 50 ms,可接受
+
+    :raises ScriptNotFound: slug 目录不存在
+    :raises PayloadTooLarge: 打包后超过 :data:`MAX_ZIP_TOTAL_BYTES`
+    :returns: ``(zip_bytes, sha256_hex, size_bytes)``
+    """
+    scripts_root = Path(scripts_root).resolve()
+    target = scripts_root / slug
+
+    if not target.is_dir():
+        raise ScriptNotFound(
+            f"脚本目录不存在: {slug}",
+            details={"slug": slug, "path": str(target)},
+        )
+
+    # 安全:target 必须在 scripts_root 下(防 slug 含 .. 等)
+    try:
+        target.resolve().relative_to(scripts_root)
+    except ValueError as exc:
+        raise PermissionError(
+            f"slug 路径逃出 scripts_root: {target}",
+            details={"slug": slug, "target": str(target)},
+        ) from exc
+
+    buf = io.BytesIO()
+    file_count = 0
+    raw_total = 0
+
+    with ZipFile(buf, "w", compression=ZIP_DEFLATED, compresslevel=6) as zf:
+        for path in sorted(target.rglob("*")):
+            if not path.is_file():
+                continue
+            try:
+                rel = path.relative_to(target)
+            except ValueError:
+                continue
+
+            parts = rel.parts
+
+            # 排除目录
+            if any(p in BUNDLE_EXCLUDE_DIRS for p in parts):
+                continue
+            # 排除后缀
+            if path.suffix.lower() in BUNDLE_EXCLUDE_SUFFIXES:
+                continue
+            # 排除点开头文件(除了 .gitignore 等)
+            base = rel.name
+            if base.startswith(".") and base not in {".gitignore", ".env.example"}:
+                continue
+
+            raw_total += path.stat().st_size
+            if raw_total > MAX_ZIP_TOTAL_BYTES:
+                raise PayloadTooLarge(
+                    f"脚本 {slug!r} 原始大小 > 上限 {MAX_ZIP_TOTAL_BYTES} 字节",
+                    details={
+                        "slug": slug,
+                        "raw_total": raw_total,
+                        "limit": MAX_ZIP_TOTAL_BYTES,
+                    },
+                )
+
+            zf.write(path, arcname=rel.as_posix())
+            file_count += 1
+
+    if file_count == 0:
+        raise ValidationError(
+            f"脚本 {slug!r} 过滤后没有任何文件,打包失败",
+            details={"slug": slug},
+        )
+
+    data = buf.getvalue()
+    if len(data) > MAX_ZIP_TOTAL_BYTES:
+        raise PayloadTooLarge(
+            f"脚本 {slug!r} 压缩后 {len(data)} > 上限 {MAX_ZIP_TOTAL_BYTES} 字节",
+            details={
+                "slug": slug,
+                "size": len(data),
+                "limit": MAX_ZIP_TOTAL_BYTES,
+            },
+        )
+
+    sha = hashlib.sha256(data).hexdigest()
+    logger.debug(
+        "compute_script_bundle slug={} files={} raw={} zip={} sha={}",
+        slug, file_count, raw_total, len(data), sha[:12],
+    )
+    return data, sha, len(data)

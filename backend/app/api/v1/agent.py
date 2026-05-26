@@ -1,13 +1,16 @@
-"""Agent 端 API — `/api/v1/agent/*`(MVP-1 远程 agent)。
+"""Agent 端 API — `/api/v1/agent/*`(MVP-1 远程 agent + MVP-2 Bundle 分发)。
 
-设计稿:`进度/设计/远程VPS脚本执行调研.md` § 5 / § 9。
+设计稿:`进度/设计/远程VPS脚本执行调研.md` § 5 / § 9
+MVP-2 Bundle 分发:`进度/变更/2026-05-25-通知UI增强+脚本同步Pull方案设计.md` § 2
 
-端点清单(4 个)
+端点清单(6 个)
 ---------------
-- GET  /agent/poll?wait=30           agent 长轮询拉任务
-- POST /agent/runs/{run_id}/stdout    agent 增量回传 stdout/stderr
-- POST /agent/runs/{run_id}/result    agent 回传终态
-- POST /agent/heartbeat               agent 心跳(每 30s)
+- GET  /agent/poll?wait=30                       agent 长轮询拉任务
+- POST /agent/runs/{run_id}/stdout                agent 增量回传 stdout/stderr
+- POST /agent/runs/{run_id}/result                agent 回传终态
+- POST /agent/heartbeat                           agent 心跳(每 30s)
+- GET  /agent/scripts/{slug}/manifest             MVP-2 拉脚本 manifest + bundle_sha256
+- GET  /agent/scripts/{slug}/bundle.zip           MVP-2 下载脚本 zip(zip 流)
 
 鉴权:走 ``app.middleware.agent_auth.AgentNode`` 依赖(Bearer token);
 **不走** session middleware。CSRF middleware 已豁免 ``/api/v1/agent/*``。
@@ -25,13 +28,14 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Query, Response, status
 from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.core.crypto import get_cipher
-from app.core.exceptions import RunNotFound, ValidationError
+from app.core.exceptions import RunNotFound, ScriptNotFound, ValidationError
 from app.db.models.instance import Instance
 from app.db.models.run import Run
 from app.db.models.script import Script
@@ -48,7 +52,7 @@ from app.schemas.node import (
     AgentTaskPayload,
 )
 from app.scheduler.executor import _extract_env_passthrough
-from app.services import node_service
+from app.services import node_service, script_upload_service
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -421,4 +425,96 @@ async def agent_heartbeat(
         server_time=_utcnow(),
         node_id=node.id,
         node_slug=node.slug,
+    )
+
+
+# ============================================================
+# MVP-2 · Bundle 分发(agent 拉脚本)
+# ============================================================
+@router.get(
+    "/scripts/{slug}/manifest",
+    summary="Agent 拉脚本 manifest(版本 + bundle hash)",
+)
+async def agent_get_script_manifest(
+    slug: str,
+    node: AgentNode,
+    db: DBSession,
+) -> dict[str, Any]:
+    """返回脚本元数据 + bundle.zip 的 sha256,供 agent 判断是否需要拉。
+
+    流程:
+    1. agent 收到 task 后,先 GET 本端点拿 ``bundle_sha256``
+    2. 比对本地 ``.bundle_sha256`` marker
+    3. 不一致 → GET ``/scripts/<slug>/bundle.zip`` 拉 zip 解压
+
+    每次重新计算 sha256(小脚本 < 100ms,可接受)。
+    """
+    script = db.scalars(select(Script).where(Script.slug == slug)).first()
+    if script is None:
+        raise ScriptNotFound(
+            f"脚本 {slug!r} 未在主面板入库",
+            details={"slug": slug, "node": node.slug},
+        )
+
+    settings = get_settings()
+    scripts_root = settings.scripts_dir.resolve()
+
+    _data, sha, size = script_upload_service.compute_script_bundle(
+        scripts_root, slug
+    )
+
+    return {
+        "slug": slug,
+        "version": script.version,
+        "manifest_hash": script.manifest_hash,
+        "bundle_sha256": sha,
+        "bundle_size": size,
+    }
+
+
+@router.get(
+    "/scripts/{slug}/bundle.zip",
+    summary="Agent 下载脚本 bundle(zip 流)",
+)
+async def agent_get_script_bundle(
+    slug: str,
+    node: AgentNode,
+    db: DBSession,
+) -> Response:
+    """返 ``scripts/<slug>/`` 打包成 zip 的二进制流。
+
+    过滤:跳过 ``.backups/`` / ``__pycache__/`` / ``data/`` / ``.git/`` /
+    ``_dry_run_data/`` / ``node_modules/`` / ``.pytest_cache/`` 等目录,
+    跳过 ``.pyc / .log / .tmp / .DS_Store`` 等后缀。
+
+    Response header ``X-Bundle-SHA256`` 也带 sha256,供 agent 额外校验。
+    """
+    script = db.scalars(select(Script).where(Script.slug == slug)).first()
+    if script is None:
+        raise ScriptNotFound(
+            f"脚本 {slug!r} 未在主面板入库",
+            details={"slug": slug, "node": node.slug},
+        )
+
+    settings = get_settings()
+    scripts_root = settings.scripts_dir.resolve()
+
+    data, sha, size = script_upload_service.compute_script_bundle(
+        scripts_root, slug
+    )
+
+    logger.info(
+        "agent.bundle: node {!r} → slug={} size={} sha={}",
+        node.slug, slug, size, sha[:12],
+    )
+
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{slug}.zip"',
+            "X-Bundle-SHA256": sha,
+            "X-Bundle-Size": str(size),
+            "Cache-Control": "no-store",
+        },
     )
