@@ -294,7 +294,7 @@ function AddNodeDialog({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={2}
-              placeholder="如:38.55.132.186 - Chrome/Xvfb 完整环境,跑 selenium 类脚本"
+              placeholder="如:美西节点 - Chrome/Xvfb 完整环境,跑 selenium 类脚本"
             />
           </div>
         </div>
