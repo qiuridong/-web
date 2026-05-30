@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import ScriptNotFound
@@ -90,7 +90,7 @@ def list_scripts_with_counts(
     q: str | None = None,
     page: int = 1,
     page_size: int = 20,
-) -> tuple[list[tuple[Script, int]], int]:
+) -> tuple[list[tuple[Script, dict[str, Any]]], int]:
     """audit High #7:列表 + instance_count 一次 SQL 拉出(消除 N+1)。
 
     替代旧版"先 list_scripts,再对每条调 _count_instances_for"路径
@@ -115,10 +115,36 @@ def list_scripts_with_counts(
             count_stmt = count_stmt.where(c)
     total = int(db.execute(count_stmt).scalar_one())
 
-    # outerjoin Instance + group by Script.id —— SQLite 支持 GROUP BY 单列
-    # 后选 Script 全部列
+    # 最近一次执行状态:取该脚本所有实例里 last_run_at 最新那条的 last_run_status
+    # (相关子查询,SQLite 支持;无任何运行则 NULL → 前端显示"尚未执行")
+    last_status_subq = (
+        select(Instance.last_run_status)
+        .where(
+            Instance.script_id == Script.id,
+            Instance.last_run_at.is_not(None),
+        )
+        .order_by(Instance.last_run_at.desc())
+        .limit(1)
+        .correlate(Script)
+        .scalar_subquery()
+    )
+
+    # outerjoin Instance + group by Script.id 一次拉出脚本级聚合(消除 N+1):
+    # instance_count / 启用数 / 最近执行(MAX last_run_at)/ 最近下次(MIN next_run_at)
+    # / 累计执行·成功数(SUM)。执行统计冗余在 instance 层、调度器每次 run 后回写。
     stmt = (
-        select(Script, func.count(Instance.id).label("instance_count"))
+        select(
+            Script,
+            func.count(Instance.id).label("instance_count"),
+            func.coalesce(
+                func.sum(case((Instance.enabled.is_(True), 1), else_=0)), 0
+            ).label("instance_enabled_count"),
+            func.max(Instance.last_run_at).label("last_run_at"),
+            func.min(Instance.next_run_at).label("next_run_at"),
+            func.coalesce(func.sum(Instance.total_runs), 0).label("total_runs"),
+            func.coalesce(func.sum(Instance.total_successes), 0).label("total_successes"),
+            last_status_subq.label("last_run_status"),
+        )
         .outerjoin(Instance, Instance.script_id == Script.id)
         .group_by(Script.id)
     )
@@ -130,7 +156,21 @@ def list_scripts_with_counts(
     stmt = stmt.order_by(Script.slug.asc()).offset(offset).limit(page_size)
 
     rows = db.execute(stmt).all()
-    items = [(row[0], int(row[1] or 0)) for row in rows]
+    items = [
+        (
+            row[0],
+            {
+                "instance_count": int(row[1] or 0),
+                "instance_enabled_count": int(row[2] or 0),
+                "last_run_at": row[3],
+                "next_run_at": row[4],
+                "total_runs": int(row[5] or 0),
+                "total_successes": int(row[6] or 0),
+                "last_run_status": row[7],
+            },
+        )
+        for row in rows
+    ]
     return items, total
 
 
@@ -197,6 +237,28 @@ def get_script_detail(db: Session, slug: str) -> dict[str, Any]:
 
     instance_count = _count_instances_for(db, script.id)
 
+    # 脚本级执行聚合(从实例冗余字段汇总)— 让详情页也显示真实"上次/下次执行"
+    agg = db.execute(
+        select(
+            func.coalesce(
+                func.sum(case((Instance.enabled.is_(True), 1), else_=0)), 0
+            ),
+            func.max(Instance.last_run_at),
+            func.min(Instance.next_run_at),
+            func.coalesce(func.sum(Instance.total_runs), 0),
+            func.coalesce(func.sum(Instance.total_successes), 0),
+        ).where(Instance.script_id == script.id)
+    ).one()
+    last_run_status = db.execute(
+        select(Instance.last_run_status)
+        .where(
+            Instance.script_id == script.id,
+            Instance.last_run_at.is_not(None),
+        )
+        .order_by(Instance.last_run_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
     # 把 ORM 字段拉出来(避免 ScriptDetail.model_validate 时再访问 lazy 属性)
     return {
         "id": script.id,
@@ -211,6 +273,12 @@ def get_script_detail(db: Session, slug: str) -> dict[str, Any]:
         "enabled": script.enabled,
         "requires_secret": script.requires_secret,
         "instance_count": instance_count,
+        "instance_enabled_count": int(agg[0] or 0),
+        "last_run_at": agg[1],
+        "next_run_at": agg[2],
+        "last_run_status": last_run_status,
+        "total_runs": int(agg[3] or 0),
+        "total_successes": int(agg[4] or 0),
         "manifest_path": script.manifest_path,
         "manifest_hash": script.manifest_hash,
         "last_scanned_at": script.last_scanned_at,
