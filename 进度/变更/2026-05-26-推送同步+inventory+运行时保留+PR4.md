@@ -218,7 +218,7 @@ docker compose exec -T backend python -m alembic upgrade head
 - `pnpm build` → hash `index-BRM9k0Qo.js`
 - `tar dist → scp → 解压` → 备份 `dist.backup.20260526-040406/`
 
-### Agent (VPS-JM 38.55.132.186)
+### Agent (VPS-JM 198.51.100.10)
 ```
 scp agent/signin_agent.py → /opt/signin-agent/signin_agent.py
 systemctl restart signin-agent

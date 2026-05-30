@@ -15,7 +15,7 @@
     │
     │ HTTPS long-polling(agent 主动出站)
     ▼
-[ VPS-JM (38.55.132.186) ]
+[ VPS-JM (198.51.100.10) ]
     └ signin-agent (systemd)
         ├ GET /api/v1/agent/poll?wait=30 ← 拉 task
         ├ subprocess /opt/signin-agent/sandbox_runner.py < stdin
