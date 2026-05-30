@@ -29,6 +29,7 @@ import {
 } from '@/components/ui/sheet';
 
 import StatusBadge, { type Status } from '@/components/common/StatusBadge';
+import { CancelRunButton } from '@/components/common/CancelRunButton';
 import { useRun, type RunStatus } from '@/api/hooks/runs';
 import { formatDate, formatDuration, formatRelative } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -64,10 +65,20 @@ export function RunDetailSheet({ open, onOpenChange, runId }: RunDetailSheetProp
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
         <SheetHeader className="border-b border-border px-6 py-4">
-          <SheetTitle>执行详情</SheetTitle>
-          <SheetDescription>
-            {run ? `Run #${run.id}` : runId ? `Run #${runId}` : '—'}
-          </SheetDescription>
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-1.5">
+              <SheetTitle>执行详情</SheetTitle>
+              <SheetDescription>
+                {run ? `Run #${run.id}` : runId ? `Run #${runId}` : '—'}
+              </SheetDescription>
+            </div>
+            {/* pending/running 才显示取消按钮(CancelRunButton 对其它状态自动返回 null)。
+                取消成功后 useCancelRun 失效查询 → 本抽屉 run 重拉 → 状态变 cancelled 按钮自隐,
+                抽屉保持打开让用户看到结果 */}
+            {run ? (
+              <CancelRunButton runId={run.id} status={run.status} className="shrink-0" />
+            ) : null}
+          </div>
         </SheetHeader>
 
         <div className="flex-1 overflow-y-auto px-6 py-5">

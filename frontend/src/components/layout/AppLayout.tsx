@@ -204,6 +204,7 @@ function Sidebar({
   logoText,
   siteTitle,
   siteSubtitle,
+  translucent = false,
 }: {
   collapsed: boolean;
   onToggle: () => void;
@@ -211,14 +212,19 @@ function Sidebar({
   logoText?: string;
   siteTitle?: string;
   siteSubtitle?: string;
+  /** 有壁纸背景时侧栏半透明 + 毛玻璃,让壁纸透出来(整屏统一背景) */
+  translucent?: boolean;
 }) {
   const location = useLocation();
   return (
     <aside
       data-collapsed={collapsed || undefined}
       className={cn(
-        'group/sidebar flex h-full flex-col overflow-hidden',
-        'border-r border-border bg-card text-card-foreground',
+        'group/sidebar flex h-full flex-col overflow-hidden border-r text-card-foreground',
+        // 有壁纸 → 半透明毛玻璃(壁纸透出);无壁纸 → 纯色 card
+        translucent
+          ? 'border-border/50 bg-card/65 backdrop-blur-xl supports-[backdrop-filter]:bg-card/55'
+          : 'border-border bg-card',
       )}
     >
       {/* Header(品牌 / 折叠 toggle) — 整个区域可点击切换折叠态,UI 更自然 */}
@@ -472,8 +478,10 @@ export function AppLayout() {
 
   const sidebarWidth = sidebarCollapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH;
 
-  // 背景图 inline style — 应用到 main 内部 min-h-full 包装(随 scroll content 等高,
-  // 不是 main viewport),这样滚动到底部背景仍覆盖,且 overlay 跟着一起延伸
+  // 背景图 inline style — 应用到**根容器**(整个 app shell:侧栏 + 顶栏 + 内容)。
+  // 根容器 h-screen + overflow-hidden,所以背景等效 viewport 固定;内容在 <main>
+  // 内独立滚动,壁纸始终铺满整屏,任何空隙/溢出露出的都是壁纸(不再是白底,
+  // 顺带修手机端右侧白块)。
   const hasBackground = !!app.background_image_data_url;
   const backgroundWrapperStyle: React.CSSProperties = hasBackground
     ? {
@@ -481,9 +489,6 @@ export function AppLayout() {
         backgroundSize: 'cover',
         backgroundPosition: 'center',
         backgroundRepeat: 'no-repeat',
-        // background-attachment 用默认 'scroll' — 跟 wrapper(min-h-full)一起滚动,
-        // overlay 也跟 wrapper 一起延伸,两者始终对齐覆盖完整 scroll content
-        // (用 'fixed' 会跟 overlay 移动错位,且视觉上覆盖 sidebar)
         backgroundBlendMode: app.background_blend_mode || 'normal',
       }
     : {};
@@ -506,12 +511,13 @@ export function AppLayout() {
     ? Math.max(0, Math.min(40, app.background_blur))
     : 0;
 
-  // 背景图模糊覆盖层 + opacity 罩 — absolute inset: 0 相对 min-h-full 包装,
-  // 跟 scroll content 等高,滚动到底部仍被覆盖
+  // 背景图模糊覆盖层 + opacity 罩 — absolute inset:0 铺满根容器(整个 shell),
+  // z-0 在所有内容之下(侧栏 / 顶栏 / 主区都 relative z-10 在它之上)
   const backgroundOverlayStyle: React.CSSProperties = hasBackground
     ? {
         position: 'absolute',
         inset: 0,
+        zIndex: 0,
         pointerEvents: 'none',
         // opacity=1 → 全透明(完全看清背景图),opacity=0 → 全色遮罩(完全隐藏背景图)
         backgroundColor: `rgba(${overlayRGB}, ${1 - safeOpacity})`,
@@ -537,7 +543,9 @@ export function AppLayout() {
     <TooltipProvider delayDuration={300}>
       <div
         className={cn(
-          'flex h-screen w-full overflow-hidden bg-background',
+          'relative flex h-screen w-full overflow-hidden',
+          // 无壁纸时用纯色底;有壁纸时背景图铺满整个 app shell(下方 style 注入)
+          !hasBackground && 'bg-background',
           // < md: 纯 flex(sidebar 不参与 grid,改 mobile Sheet);
           // >= md: CSS Grid 2 列(sidebar 列宽动态,main 列 1fr)
           'md:grid',
@@ -545,10 +553,17 @@ export function AppLayout() {
         style={{
           gridTemplateColumns: `${sidebarWidth}px 1fr`,
           transition: 'grid-template-columns 200ms ease',
+          // 壁纸铺满整个布局(侧栏 + 顶栏 + 内容都在它之上)
+          ...backgroundWrapperStyle,
         }}
       >
-        {/* Desktop sidebar — md+ 直接渲染在 grid 第 1 列(PR #7 mobile 抽屉 + PR #8 logo/title props 融合) */}
-        <div className="hidden md:block">
+        {/* 全局壁纸遮罩(opacity 调亮暗 + blur)— absolute 铺满 shell,z-0 在所有内容之下 */}
+        {hasBackground ? (
+          <div style={backgroundOverlayStyle} aria-hidden="true" />
+        ) : null}
+
+        {/* Desktop sidebar — md+ 直接渲染在 grid 第 1 列;relative z-10 浮在壁纸遮罩之上 */}
+        <div className="relative z-10 hidden md:block">
           <Sidebar
             collapsed={sidebarCollapsed}
             onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
@@ -556,6 +571,7 @@ export function AppLayout() {
             logoText={app.sidebar_logo_text}
             siteTitle={app.site_title}
             siteSubtitle={app.site_subtitle}
+            translucent={hasBackground}
           />
         </div>
 
@@ -577,13 +593,16 @@ export function AppLayout() {
           </SheetContent>
         </Sheet>
 
-        {/* 主区(顶栏 + Outlet),纵向 flex 让顶栏 sticky 在自己内部 */}
-        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        {/* 主区(顶栏 + Outlet),纵向 flex 让顶栏 sticky 在自己内部;relative z-10 浮在壁纸之上 */}
+        <div className="relative z-10 flex min-w-0 flex-1 flex-col overflow-hidden">
           {/* Topbar — mobile 加汉堡按钮在左,desktop 隐藏(直接显搜索) */}
           <header
             className={cn(
-              'sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b border-border',
-              'bg-background/70 backdrop-blur-md',
+              'sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b',
+              // 有壁纸 → 更透 + 更强毛玻璃,与侧栏统一;无壁纸 → 原半透明顶栏
+              hasBackground
+                ? 'border-border/50 bg-background/55 backdrop-blur-xl'
+                : 'border-border bg-background/70 backdrop-blur-md',
               'px-3 sm:px-4 lg:px-6',
             )}
           >
@@ -627,21 +646,12 @@ export function AppLayout() {
             </div>
           </header>
 
-          {/* 主区滚动容器 — main 自己只负责滚动,
-              背景图 + overlay 套在内部 min-h-full 包装(随 scroll content 等高,
-              滚动到底部都能覆盖,不会露出 raw 背景图)— PR #8;
-              内层 outlet 容器用 mobile-first padding(px-3 py-4 sm:px-6 sm:py-6 lg:px-8)— PR #7 融合 */}
-          <main className="flex-1 overflow-auto">
-            <div
-              className="relative min-h-full"
-              style={backgroundWrapperStyle}
-            >
-              {hasBackground ? (
-                <div style={backgroundOverlayStyle} aria-hidden="true" />
-              ) : null}
-              <div className="relative z-[1] mx-auto w-full max-w-[1440px] px-3 py-4 sm:px-6 sm:py-6 lg:px-8">
-                <Outlet />
-              </div>
+          {/* 主区滚动容器 — 壁纸已铺在根容器(viewport 固定),main 只负责滚动内容;
+              内层 outlet 用 mobile-first padding(px-3→sm:px-6→lg:px-8)。
+              overflow-x-hidden:防止个别宽元素把整页撑出横向滚动(表格自己内部横滚)*/}
+          <main className="flex-1 overflow-y-auto overflow-x-hidden">
+            <div className="mx-auto w-full max-w-[1440px] px-3 py-4 sm:px-6 sm:py-6 lg:px-8">
+              <Outlet />
             </div>
           </main>
         </div>
