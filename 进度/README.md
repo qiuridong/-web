@@ -27,8 +27,10 @@ type: index
 - **SSH 用户**:`root`
 - **SSH 密钥(本地)**:`J:\密钥\美国质量8-8\vcs-deploy-rsa`(OpenSSH RSA 私钥)
 - **连接命令**:`ssh -i "J:\密钥\美国质量8-8\vcs-deploy-rsa" root@154.9.238.144`
-- **部署目录**(规划):`/opt/signin-panel`
-- **生产 URL**(部署后):`https://jb.aijiaxia.cc`
+- **部署目录**:`/opt/signin-panel`(后端 docker;前端静态 dist 在 `/opt/signin-panel/frontend/dist`,host nginx serve)
+- **生产 URL**:`https://jb.aijiaxia.cc`
+- **✅ 用户已授权 ssh/scp 到 `154.9.238.144` 部署 frontend dist**(2026-05-30)。前端部署惯例:本地 `pnpm build` → scp `dist` 到 `frontend/dist.staging` 校验 → `mv dist dist.backup.<时间戳> && mv dist.staging dist`(原子切换零停机)→ curl 验证 hash。**仅后端改动**才需 docker rebuild。
+- ⚠️ **Windows SSH key 坑**:`J:\密钥\...` 在 Windows OpenSSH 下报「UNPROTECTED PRIVATE KEY」拒用,需拷到本地 NTFS 临时目录 + `icacls /inheritance:r /grant:r 用户:R` 收紧权限再用,用完删(全权才能删:`icacls /grant 用户:F`)。
 
 > ⚠️ 密钥**文件本身**不在 git 里(放在外部 `J:\密钥\`),路径只用于本地操作引用。
 
@@ -48,6 +50,20 @@ docker compose logs -f backend      # 看日志
 ```
 
 ## 当前状态
+
+**2026-05-30(续6)· 🔌 #3 节点掉线通知上线(3 个后端补全收官)** — 后端:`EventType` 加 `node_offline`;`dispatcher.dispatch_node_event`(**隔离路径**,只匹配 scope=global + event=node_offline 规则,不碰 run 的 `match_rules`,零污染已有通知);`templates` 加 node 上下文 + node-offline 默认模板;新增 `tasks/node_health.py`(每分钟扫非 local 节点,`last_seen_at` 超 180s 判离线 → dispatch_node_event,`metadata._offline_alerted` 去重**免 migration**,恢复在线清除)+ `engine` 注册 **async** job。前端:event 下拉加「🔌 节点掉线」(选中自动 scope=global)+ `notification-presets` node-offline 模板 + node.* 字段速查。容器真实 DB 验证(渲染「⚠️ 节点掉线: 美国核云8-8特价JM」正确 + dispatch 无规则返 0 不真发)→ rebuild healthy + **调度器确认注册 `tasks:node_health`**(日志 `['scan_scripts','resume_paused','housekeeping','node_health']`)+ 前端 `index--pJUMndJ.js`,commit `28937ba` push。**用法**:通知页建好渠道 → 规则选「节点掉线」事件 + 选渠道保存,节点离线超 3 分钟即推送。**#8 一键安装包待用户通知再做**。
+
+**2026-05-30(续5)· ✅ #2 删节点上部署脚本上线 + 🧩 安装包方案讨论** — **#2**:`NodeDetail` 暴露 `deployed_scripts`/`pending_actions` + `node_service.request_uninstall_script` + `POST /nodes/{id}/deployed-scripts/{slug}/uninstall`(往 `pending_actions.delete` 去重 append,agent 拉取后 rmtree + ack)+ 节点卡片「管理脚本」Dialog(列已部署脚本 + 删除 + 待 agent 删除 in-flight 态)。docker cp 容器内真实 DB 验证(vps-jm 上 `jmcomic`/`my-script`)→ 后端 rebuild healthy + 前端 `index-Dw6fgzPa.js`(中途 SSH reset 致 swap 没跑,`dist.staging` 已传好后补 swap 完成),commit `0e063c7` 已 push。**🧩 安装包讨论**(用户问"给别人用的一键自部署"):干净打包(空 `scripts/`,DB/key/admin 每机首启生成)/ 无域名用 IP 可跑但 2 坑(LE 要域名 + `auth.py:63` cookie `secure=is_production` 走 HTTP 登不进)→ **推荐 `<ip>.sslip.io` 免费魔法 DNS 拿真 LE 证书** / installer 提示输入域名或公网IP / 结尾 seed 随机 admin 密码 + 提示改密。需新建 `install-panel.sh` + `COOKIE_SECURE` 开关 + seed-admin CLI(见任务)。**⏳ 待用户定优先级:安装包 vs #3 节点掉线通知(已设计未实现)**。
+
+**2026-05-30(续4)· 🔧 后端 #1「尚未执行」修复上线** — `GET /scripts` 列表/详情此前**不返回任何 run 聚合字段**,卡片/表格只能显「尚未执行 / 上次— / 下次—」(数据其实在 instance 层、调度器每次 run 回写)。后端 `script_service` 加 `MAX(last_run_at)/MIN(next_run_at)/SUM(runs,successes)/启用数` 聚合 + 最近状态相关子查询 + `ScriptListItem`/`ScriptDetail` 加 6 字段 + 路由填充(commit `bfc88da` 已 push,前端零改动)。**安全部署法**:Stage1 把新文件 `docker cp` 进运行中容器、对真实 DB 跑验证脚本(live uvicorn 仍用旧模块、**零影响**)→ 通过(coklw 18跑/15成 / jmcomic / ptfans 有真实上次下次,my-script 0 运行正确 None)→ Stage2 scp host backend + `docker compose up -d --build backend` → `Up (healthy)` + /health 200。**后端部署机制**:代码 **COPY 进镜像(非 bind-mount),改后端必 rebuild**;`scripts/` 是 bind-mount。剩 #2 删节点脚本 / #3 节点掉线通知(均需后端 rebuild,用户已授权)。
+
+**2026-05-30(续3)· 🔒 隐私脱敏** — 用户发现「添加节点」描述占位符硬编码真实 VPS IP `198.51.100.10`(`NodeList.tsx:297`,随前端打包暴露给所有访问者)→ 改通用「美西节点」,已部署 `index-DTcS_ufN.js`。该 IP 全仓 grep 共 **13 文件**:已修 1(NodeList);**用户可见未修** `scripts/jmcomic/README.md` + `manifest.yaml`(脚本详情页显示,需 scrub + scp 重传 + re-scan 更新 DB);**内部档** 进度/ 8 文件 + `agent/README.md`;**git 历史**亦含(需 filter-repo 重写才能清,破坏性)。待用户定 scrub 范围 + 确认仓库是否 public。
+
+**2026-05-30(续)· 🗑 卡片删除上线 + 后端排查 3 问题(待后端 rebuild 授权)** — 用户截图确认壁纸成了。新报 3 问题,派 opus agent 摸后端,结论 + 处置:① **卡片删除已上线**(`index-DN6FevX_.js`,backup `dist.backup.20260530-094857`)—— 删除早做了(`?delete_files=true` + `731866c`)但**只在表格视图菜单、卡片视图(默认)缺**,本次给 ScriptCard 加三点菜单补上;② **「尚未执行」bug** = `GET /scripts` 列表/详情**不返回任何 run 聚合字段**(数据在 instances 层有、调度器回写,脚本层从不聚合),待后端 `script_service` 加 MAX/MIN/SUM + schema 4 字段;③ **节点掉线通知**完全不支持(无检测任务 / EventType 无 node / dispatcher 只认 run),待后端检测任务 + 事件 + dispatcher(用 node.metadata 存已告警态免 migration);④ **删节点上部署脚本**水管全通(pending_actions.delete + agent rmtree + ack),缺 `POST /nodes/{id}/.../uninstall` + NodeDetail 暴露 `deployed_scripts`。**②③④ 均需后端 docker rebuild**,已请用户授权后端部署。本地 6 commit 未 push(待用户定 push + PR)。详见 [分支/feat-ui-fullbg-mobile-runcancel.md](分支/feat-ui-fullbg-mobile-runcancel.md)。
+
+**2026-05-30(部署完成)· 🚀 壁纸整屏统一 + 默认二次元壁纸 + 取消按钮 上线生产** — 接手另一会话前端 WIP(壁纸整屏覆盖 + 手机白块 `overflow-x-hidden`)+ 接入 `CancelRunButton` 到 `RunDetailSheet`(此前全项目零引用)+ 把 anime 黄昏 SVG 设为**项目默认壁纸**(无自定义背景时回落 + 加进 `BACKGROUND_PRESETS`)。3 commit `768c558`/`18e4d8c`/`6e44536`(**本地未 push**)。**已部署生产**:scp dist → 备份 `dist.backup.20260530-092717` → 原子切换,线上 hash `index-DyzpHkqD.js` → **`index-CcvT1q_e.js`**(顺带把**从未部署上线的 PR #9 code-review 修复**一并带上),`/health` 200 + JS/CSS 200。**视觉验证转用户**(我无 admin 密码登录不了):硬刷新后看侧栏/顶栏/内容是否整屏壁纸 + 手机端右侧白块。用户已授权 ssh/scp 部署(详见「生产部署目标」段)。
+
+**2026-05-30 · 🔧 接手前端体验改进(壁纸整屏统一 + 手机端)+ 进度文档核实修复** — 用户反馈:外观壁纸只铺在内容区,侧栏/顶栏仍纯色割裂,要**整屏统一壁纸背景**;手机端同样,且**最右侧大片白块**(疑似溢出 / 未铺背景)。新前端分支 `feat/ui-fullbg-mobile-runcancel`(从 main@`9bfaaa9` 切出,= main),涵盖 4 件:壁纸统一 + 手机端 + 运行取消 + 删除脚本,**两会话并行**(本会话:壁纸 + 手机端;另一会话:取消 + 删除)。**关键发现**:工作树已有**未提交 WIP** `AppLayout.tsx`(+41/−31,另一会话)= **壁纸整屏统一雏形已实现**(侧栏/顶栏半透明毛玻璃 + 背景上提根容器 + main `overflow-x-hidden` 顺带修白块),即用户要我做的事已在 WIP,**待用户定两会话边界**。**进度核实修复**:PR #9/#10 已 merge 进 main(原档写「待 merge」);PR #6 删脚本 / PR #7 手机响应式仍 OPEN(#7 代码已随 #8 super-PR 进 main);补全「重大变更」表缺失的 PR #5/#7/#8/#9 链接;重写「未决项」对齐 GitHub 真实 PR 号。**JM 机器刚重启**有 pending run 等执行。详见 [分支/feat-ui-fullbg-mobile-runcancel.md](分支/feat-ui-fullbg-mobile-runcancel.md)。
 
 **2026-05-27 凌晨 · 🧹 PR #8 已 merged + PR #6/#9 解 main 冲突全 MERGEABLE** — 用户 merge PR #8(super-PR 含 PR #7,commit `d6bf149`)到 main 后,**PR #6 和 PR #9 都跟 main 冲突**(预期):(1)**PR #6**(脚本彻底删除)进度文档冲突 — 接受 origin/main 完整时间线(已含 PR #6 引用),merge commit `53a2e37` push,GitHub `MERGEABLE/CLEAN`;(2)**PR #9**(code-review 14 fixes)**6 文件冲突**(settings_service / appearance / DataTable / AppLayout / sheet / Settings)— PR #9 基于 feat/appearance-settings 切出已含 PR #8 全部代码,HEAD 是 superset → **全 `git checkout --ours`** 接受 PR #9 版本(review fixes 完整保留:dirty 守卫 / XSS validator / BroadcastChannel / favicon cleanup / AlertDialog reset / backdrop 48px / NaN clamp / resize listener),merge commit `f4f3461` push,frontend build hash `index-C7rQPvNW.js` 不变(确认 PR #9 fixes 完整),`MERGEABLE/CLEAN`。两 PR 待用户 merge 后 docker rebuild backend + scp frontend dist 部署生产。详见 [变更/2026-05-27-PR6-PR9冲突解决+全MERGEABLE.md](变更/2026-05-27-PR6-PR9冲突解决+全MERGEABLE.md)。
 
@@ -99,7 +115,7 @@ docker compose logs -f backend      # 看日志
 
 **2026-05-23 晚 · 🔬 JM 100% 可靠性深度调研 + 4-5 月完整日志重判** — (1)写 [设计/JM签到100%可靠性调研.md](设计/JM签到100%可靠性调研.md)(584 行 5 方向);用户质疑 API 域名"银弹论"→ 实测 VPS-JM curl HEAD 几乎全 403 → **银弹论崩塌**;(2)拉 host syslog 全集 + journal --list-boots + signin.log → **真相揭露**:**原脚本 CF 33/33 = 100% 过盾**;5 月 3 天失败里 2 天是平台问题(5-06→5-07 VPS 停机 22h / 5-12 kernel panic + 5-13 停机 7h)+ 1 天 server 自挂(5-02 502)+ **真正脚本可优化的只有 5-23 sign 反爬空响应** 1 天;(3)修正方案路线:**原脚本+selenium 路径完全够用**,真正需要的是**平台层补签(scheduler retry_window)+ v2 已有的首页 marker 兜底**,**不需要三层回退/curl_cffi/API 域名替换**(过度工程);(4)等用户明早 5-24 看自然跑结果再决定下一步。详见 [变更/2026-05-23-JM签到100可靠性调研+5月精确日志重判.md](变更/2026-05-23-JM签到100可靠性调研+5月精确日志重判.md)。**已停 host crontab 等用户决定是否恢复让明天自然跑(/root/.crontab.backup.20260523-103809)。**
 
-**2026-05-23 · 远程 VPS MVP-1 准备阶段 + JM 完整改造(v1 selenium → v2 cookie 复用)** — (1)MVP-1 远程 agent 调研稿 [设计/远程VPS脚本执行调研.md](设计/远程VPS脚本执行调研.md) 写完(6 架构 / 420 行 / 推荐 B+F),首节点 = VPS-JM (38.55.132.186);(2)SSH 密钥免密接入 VPS-JM 完成 → 摸底发现 JM 脚本在 `/root/JMComic-Auto_Sign_in/`(host crontab 跑,不在青龙里);(3)JM 改造 v1(selenium 版,5 文件)→ sandbox 测试 CF 没过 → 用户质疑代码 → PM 严格 diff verified 100% 等价 → 对照实验(host 原版同样不过)= IP 信任分耗尽真因;(4)5 月 signin.log 统计 19/23 success + 2 异常(5-02 server 502 / 5-23 sign 空响应)+ 2 无记录;(5)v2 加精细诊断(5 类异常 + http helper);(6)用户提议 cookie 复用方案 → 抓 HAR 60MB 解析,发现 cf_clearance 2 年过期 + JM 用 PHP `remember` cookie 登录令牌 + sticky 显示 IP 绑定 = anonymous 真因;(7)**完全重构 v2 cookie 版**(15.7KB 纯 httpx,旧 selenium 改名 `main_selenium_fallback.py` 保留),manifest 改字段 + README 重写;(8)host crontab 已停 + 备份(`/root/.crontab.backup.20260523-103809`);(9)用户提议 v3 (账密 + cf_clearance 每次 login 换新 session) — 更优方案,等用户选 A/B/C/D 决定。详见 [变更/2026-05-23-JM接入+改造v1+精细诊断v2.md](变更/2026-05-23-JM接入+改造v1+精细诊断v2.md)。**关键洞察**:JM cookie 与 server IP 强绑定 → jmcomic 实例必须部署到抓 cookie 时同一出口 IP 节点 → **等 MVP-1 远程 agent 通了再上线**(在 jb.aijiaxia.cc 主面板 VPS 直接跑会被 server 拒)。
+**2026-05-23 · 远程 VPS MVP-1 准备阶段 + JM 完整改造(v1 selenium → v2 cookie 复用)** — (1)MVP-1 远程 agent 调研稿 [设计/远程VPS脚本执行调研.md](设计/远程VPS脚本执行调研.md) 写完(6 架构 / 420 行 / 推荐 B+F),首节点 = VPS-JM (198.51.100.10);(2)SSH 密钥免密接入 VPS-JM 完成 → 摸底发现 JM 脚本在 `/root/JMComic-Auto_Sign_in/`(host crontab 跑,不在青龙里);(3)JM 改造 v1(selenium 版,5 文件)→ sandbox 测试 CF 没过 → 用户质疑代码 → PM 严格 diff verified 100% 等价 → 对照实验(host 原版同样不过)= IP 信任分耗尽真因;(4)5 月 signin.log 统计 19/23 success + 2 异常(5-02 server 502 / 5-23 sign 空响应)+ 2 无记录;(5)v2 加精细诊断(5 类异常 + http helper);(6)用户提议 cookie 复用方案 → 抓 HAR 60MB 解析,发现 cf_clearance 2 年过期 + JM 用 PHP `remember` cookie 登录令牌 + sticky 显示 IP 绑定 = anonymous 真因;(7)**完全重构 v2 cookie 版**(15.7KB 纯 httpx,旧 selenium 改名 `main_selenium_fallback.py` 保留),manifest 改字段 + README 重写;(8)host crontab 已停 + 备份(`/root/.crontab.backup.20260523-103809`);(9)用户提议 v3 (账密 + cf_clearance 每次 login 换新 session) — 更优方案,等用户选 A/B/C/D 决定。详见 [变更/2026-05-23-JM接入+改造v1+精细诊断v2.md](变更/2026-05-23-JM接入+改造v1+精细诊断v2.md)。**关键洞察**:JM cookie 与 server IP 强绑定 → jmcomic 实例必须部署到抓 cookie 时同一出口 IP 节点 → **等 MVP-1 远程 agent 通了再上线**(在 jb.aijiaxia.cc 主面板 VPS 直接跑会被 server 拒)。
 
 **2026-05-19 · 🎉 MVP-5 全栈上线 + 3 hotfix 落地** — (1) MVP-5 派 2 opus agent 并行实施,**verify 30/30 全过**(后端 4 新 + 4 改 / 前端 5 组件 + 2 hooks + 集成 + 6 新依赖,vendor-codemirror 480KB 完全 lazy load,主 bundle 仅增 14KB);(2) hotfix #1 executor.py PYTHONPATH 安全透传(audit Critical #1 过头修复 → 生产 cron httpx 缺失,先 hot patch 再本次完整 build 永久);(3) hotfix #2 ptfans `_check_logged_in` 用宽松 RE_LOGGED_IN_HINT(原 RE_USERNAME 硬编码 class="User_Name" 与主题耦合 → 误判已登录页为未登录 → 误报 cookie 过期);(4) hotfix #3 format.ts toDate() 自动补 Z 后缀(parseISO 把 naive UTC 当本地时间 → 中国用户全部时间偏 -8h → 用户误判"1 点 cron 没触发",其实 Run #13 success "今日已签到")。**部署完成**:`docker compose build backend` 把 executor hotfix 永久带上 + 前端新 hash `index-V0pR5svQ.js`。**生产实际数据已 verified**:coklw 凌晨 1 点 scheduled cron + 上午 10:10 manual + ptfans 9:00 scheduled 全 success。详见 [变更/2026-05-19-MVP5上线+3-hotfix.md](变更/2026-05-19-MVP5上线+3-hotfix.md)。**等用户**:Ctrl+F5 硬刷新 + 真测一次 MVP-5 上传 / 编辑闭环。git push 等用户授权(预计 3 个 commits)。
 
@@ -198,12 +214,21 @@ docker compose logs -f backend      # 看日志
 
 | 分支 | 状态 | 文件 |
 |---|---|---|
-| `main` | 🔄 设计完成,等开干 | [分支/main.md](分支/main.md) |
+| `main` | ✅ 生产在跑(MVP-5 + 远程 agent + 外观完整版)`9bfaaa9` | [分支/main.md](分支/main.md) |
+| `feat/ui-fullbg-mobile-runcancel` | 🔄 **当前** · 壁纸整屏统一 + 手机端 + 运行取消 + 删脚本(两会话并行,有未提交 AppLayout WIP) | [分支/feat-ui-fullbg-mobile-runcancel.md](分支/feat-ui-fullbg-mobile-runcancel.md) |
+| `fix/script-list-delete-with-files` | 🔄 PR #6 OPEN · 彻底删除脚本(含磁盘),另一会话收尾 | — |
+| `fix/mobile-responsive` | ⏸ PR #7 OPEN · 代码已随 #8 super-PR 进 main | — |
 
 ## 重大变更(新→旧)
 
 | 日期 | 标题 | 文件 |
 |---|---|---|
+| 2026-05-30 | 🔧 **接手前端体验改进 + 进度核实修复**(本档) — 壁纸整屏统一 + 手机端右侧白块,新分支 `feat/ui-fullbg-mobile-runcancel`,两会话并行(壁纸/手机 vs 取消/删除);发现 `AppLayout.tsx` 已有未提交壁纸统一 WIP;修进度:#9/#10 已 merge、补全本表 PR #5/#7/#8/#9 链接、重写未决项对齐真实 PR 号 | [分支/feat-ui-fullbg-mobile-runcancel.md](分支/feat-ui-fullbg-mobile-runcancel.md) |
+| 2026-05-27 凌晨 | 🧹 **PR #6/#9 解 main 冲突全 MERGEABLE** — PR #8(super-PR 含 #7)merge 后,#6(删脚本)/#9(code-review 14 fix)与 main 冲突;#6 接 origin/main 时间线、#9 全 `--ours`(review fixes 完整保留),两 merge commit push,全 `MERGEABLE/CLEAN`,hash `index-C7rQPvNW.js`。后用户 merge #9/#10 进 main | [变更/2026-05-27-PR6-PR9冲突解决+全MERGEABLE.md](变更/2026-05-27-PR6-PR9冲突解决+全MERGEABLE.md) |
+| 2026-05-26 深夜末 | 🔍 **PR #7→#8 预解 AppLayout 冲突 + code-review 15 findings** — merge PR #7 到 appearance 分支(super-PR,hash `index-DyzpHkqD.js`),3 处真冲突融合;code-review `--effort high` 派 6 agent → 15 findings(HIGH 5 含 XSS / MED 7 / LOW 3),`fix/code-review-findings` 批量修(落地 PR #9 的 14 fix) | [变更/2026-05-26-PR8冲突预解+代码审核15findings.md](变更/2026-05-26-PR8冲突预解+代码审核15findings.md) |
+| 2026-05-26 深夜 | 🎨 **外观完整版(PR #8,已 merge `d6bf149`)** — 复用 `settings` KV 表 + 通用 `GET/PUT /settings/{key}`;frontend `appearance.ts` + Settings `<BrandingCard>`(标题/副标题/侧栏 Logo/Logo 图/背景图/透明度/模糊/混合模式)+ AppLayout 注入(document.title / Sidebar logo&title / main 背景图 + overlay);Phase 2 favicon 自动生成 + 6 预设背景 + bg-scroll 修复(min-h-full 包装);base64 内联,无 migration,hash `index-BH1uqoCf.js` | [变更/2026-05-26-外观完整版+PR8.md](变更/2026-05-26-外观完整版+PR8.md) |
+| 2026-05-26 深夜 | 📱 **手机端响应式核心 80%(PR #7,代码已随 #8 进 main)** — `AppLayout` mobile sidebar 改 Sheet 抽屉 + Topbar ☰ 汉堡 + 路由切换自动关 + 主区 mobile-first padding;`ui/sheet.tsx` 全局 mobile 全宽(`w-[calc(100vw-1rem)]`,修 7+ 组件);`DataTable` 内层 `overflow-x-auto` 横滚。hash `index-BfTq87Sg.js`。Phase 2 polish 留真机反馈 | [变更/2026-05-26-手机响应式+PR7.md](变更/2026-05-26-手机响应式+PR7.md) |
+| 2026-05-26 晚 | 🩹 **模板 dry-run 短路 + 三层防踩坑提示(PR #5,已 merge `2fd989f`)** — 模板 main.py dry-run 短路(`run_id==0 且 instance_id==0 → success`)+ 前端 ErrorPanel 识别 dry-run failure 弹指引 + ScriptDevGuideSheet 加章节;3 文件 +134/−6,hash `index-C90PO6bp.js` | [变更/2026-05-26-模板dry-run短路+三层提示防踩坑.md](变更/2026-05-26-模板dry-run短路+三层提示防踩坑.md) |
 | 2026-05-26 傍晚 | 🚀 **推送同步 + Inventory + 修运行时保留(PR #4)** — 接 PR #3 用户反馈"我要上传到指定 vps 脚本"(MVP 简化掉立即推送),本 PR 补完。alembic 0003 加 `nodes.pending_actions/deployed_scripts JSON`;backend poll piggyback push + 新 `POST /agent/inventory-report` + script_upload 接 `?sync_to_nodes`;agent `_handle_pending_actions` + 启动 + 5min 兜底 + `RUNTIME_PRESERVE_DIRS` 修 sync 全替换缺陷;frontend 实际传 selectedNodeIds + toast 改"30s 内完成"。Push via Poll piggyback(pull-only 架构最干净伪推送),向后兼容。三端已部署(backend `0003_pending_actions` migration + frontend `index-BRM9k0Qo.js` + agent restart 后 inventory-report 200)。7 files +625。e2e 待用户 web 验证。**PR #4 待 push** | [变更/2026-05-26-推送同步+inventory+运行时保留+PR4.md](变更/2026-05-26-推送同步+inventory+运行时保留+PR4.md) |
 | 2026-05-26 下午 | 📡 **脚本同步 Pull 方案实施 + PR #3** — backend `compute_script_bundle` 110 行(过滤 + 防 Zip Slip + 防大小爆炸)+ 2 endpoint(`/agent/scripts/{slug}/manifest` + `bundle.zip`);agent `_ensure_script_synced` 180 行(sha256 比对 + 客户端二次校验 + 两层 Zip Slip 防御 + 原子解压 + 备份回滚),在 `_execute()` 开头调用失败仅 log;frontend UploadScriptDialog 加"同步到节点"多选 + toast 提示(MVP 仅 UI 标记,实际走按需 Pull);4 files +552 -14,**无 DB 改动 / 无新依赖**;frontend build hash `index-Bc_l0TAF.js`;[PR #3](https://github.com/qiuridong/-web/pull/3) commit `6b6d063` 待 review | [变更/2026-05-26-脚本同步Pull方案实施+PR3.md](变更/2026-05-26-脚本同步Pull方案实施+PR3.md) |
 | 2026-05-25 凌晨更晚 | 📦 **脚本上传 UX 增强上线 + 首个 PR #1** — `script-template.ts` 新建(4 模板 + buildTemplateZip 前端动态生成 zip)+ `ScriptDevGuideSheet.tsx`(9 章节协议右侧 Sheet)+ `UploadScriptDialog.tsx` 改造(jszip+js-yaml 预解析,5 项 checklist 缺必填禁用上传,manifest 摘要绿框 / yaml 错误红框,顶部下载模板 + 开发指南按钮);线上 hash `index-Cn-vxQI_.js`;**仓库首个 PR** [#1](https://github.com/qiuridong/-web/pull/1) `feat/script-upload-ux-enhancement` → `main`(commit `9eabeb9`)等 review | [变更/2026-05-25-脚本上传UX增强+PR1.md](变更/2026-05-25-脚本上传UX增强+PR1.md) |
@@ -215,7 +240,7 @@ docker compose logs -f backend      # 看日志
 | 2026-05-23 深夜 | 🎯 **JM v1 整改 + scp 接入主面板 web(Phase 1+2)+ MVP-1 远程 agent 后台启动** — v2 废弃删 → v1 升格 main.py + 补 `_chunked_sleep` + 改账密字段;scp 5 文件到主面板 + chown + docker restart → SQLite 3 个脚本入库(jmcomic id=3)→ web /scripts 能看 3 卡片;host crontab `0 1 * * *` 激活(北京 9-10 窗口);派 1 opus agent 后台跑完整 MVP-1(预计 4-8h) | [变更/2026-05-23晚-JM-v1整改与web接入.md](变更/2026-05-23晚-JM-v1整改与web接入.md) |
 | 2026-05-23 晚 | 🔬 **JM 100% 可靠性深度调研 + 4-5 月日志精确重判** — 5 个方向调研 → API 域名"银弹论"被实测否决 → 拉全 host 日志(syslog+journal+signin.log)→ 真相:**原脚本 CF 33/33 = 100% 过盾**;5 月失败 3 天 = 2 天 VPS 平台问题(停机 22h + kernel panic)+ 1 天 server 502 + 1 天 sign 反爬空响应 → 修正路线**不再追求复杂方案,平台层补签 + v2 首页 marker 兜底足矣** | [变更/2026-05-23-JM签到100可靠性调研+5月精确日志重判.md](变更/2026-05-23-JM签到100可靠性调研+5月精确日志重判.md) |
 | 2026-05-17 | **前端 abort 错误 toast 静默 hotfix**(`client.ts onError` 漏过滤 AbortError 导致用户被红色误导)+ dist 替换 `index-JmCKC6a4.js` | [变更/2026-05-17-前端abort错误toast静默-hotfix.md](变更/2026-05-17-前端abort错误toast静默-hotfix.md) |
-| 2026-05-23 晚 | 🎯 **JM(18comic.vip)接入 + 改造 v1 + 精细诊断 v2**:VPS 38.55.132.186 SSH 接入(密钥 `J:\密钥\8-8特价美国\jm-186-ed25519`)+ `scripts/jmcomic/` 5 文件改造 + scp sandbox 测试(CF 未过 diff verified 同 IP 同天第二次升级)+ signin.log 728 行分析(5 月 19/23 天成功,**5-23 sign 接口空响应是新错误**)+ 用户手动签到成功证实**JM 反爬升级**(对自动化 sign 静默返空)+ **v2 改造 668 行精细诊断**(6 异常类 / `_http_request` 统一 diag / **`_check_already_signed_via_index` 首页 marker 兜底**) | [变更/2026-05-23-JM接入+改造v1+精细诊断v2.md](变更/2026-05-23-JM接入+改造v1+精细诊断v2.md) |
+| 2026-05-23 晚 | 🎯 **JM(18comic.vip)接入 + 改造 v1 + 精细诊断 v2**:VPS 198.51.100.10 SSH 接入(密钥 `J:\密钥\8-8特价美国\jm-186-ed25519`)+ `scripts/jmcomic/` 5 文件改造 + scp sandbox 测试(CF 未过 diff verified 同 IP 同天第二次升级)+ signin.log 728 行分析(5 月 19/23 天成功,**5-23 sign 接口空响应是新错误**)+ 用户手动签到成功证实**JM 反爬升级**(对自动化 sign 静默返空)+ **v2 改造 668 行精细诊断**(6 异常类 / `_http_request` 统一 diag / **`_check_already_signed_via_index` 首页 marker 兜底**) | [变更/2026-05-23-JM接入+改造v1+精细诊断v2.md](变更/2026-05-23-JM接入+改造v1+精细诊断v2.md) |
 | 2026-05-23 | 📝 **远程 VPS 多节点调研** + VPS-B 154.9.238.251 SSH 密钥接入完成(MVP-1 准备阶段,等用户回 JM 脚本所在机器后开干) | [变更/2026-05-23-远程VPS-MVP1-准备阶段.md](变更/2026-05-23-远程VPS-MVP1-准备阶段.md) |
 | 2026-05-23 | **远程 VPS MVP-1 准备 + JM 完整改造**(v1 selenium → v2 cookie 复用)+ HAR 分析揭示 cf_clearance 2 年寿命/`remember` PHP 令牌/IP 强绑定 + host cron 停 | [变更/2026-05-23-JM接入+改造v1+精细诊断v2.md](变更/2026-05-23-JM接入+改造v1+精细诊断v2.md) |
 | 2026-05-25 | 🎉 **多合一 N=3 jmcomic 上线 + v1.1.0 业务弹性集大成**(session 复用 + cookies TTL + 8 marker 兜底)— CF 信任分模型 verified / cookie 复用 v2 探索后回归 selenium v1.1.0 + 加弹性 | [变更/2026-05-25-JM接入+v1.1.0业务弹性上线.md](变更/2026-05-25-JM接入+v1.1.0业务弹性上线.md) |
@@ -259,41 +284,26 @@ docker compose logs -f backend      # 看日志
 
 | 项 | 备注 |
 |---|---|
-| **5-25 09:00-10:00 北京 jmcomic agent cron 真测** | ⏸ **P0** — 今晚 host crontab 已停 + agent 部署到 VPS-JM(节点 `vps-us8-8-jm`)+ 实例 cron `0 1 * * *`(UTC)+ random_delay 0-3600s。验证项:走 random_delay(非 manual)/ CF 一次过(IP 信任分恢复)/ POST /sign HTTP 200 / **真 JCoin/EXP 到账**。结果决定:✅ → 整链路 production-ready / ❌ → 看具体失败模式调整 |
-| ✅ ~~脚本同步 Pull 方案 + 上传时选节点~~ | **PR #3 已 merged + 部署**(commit `63ade4e`)。但 MVP 简化掉"立即推送"被用户反馈,转 PR #4 补完(本档) |
-| ✅ ~~PR #1 review + merge~~ | **已完成**(commit `604404f`)。进度文档化为 [PR #2](https://github.com/qiuridong/-web/pull/2) |
-| **PR #4 review + merge + e2e** | 待 push + 开 PR;e2e 步骤:web 下载模板 zip → 拖回来勾 vps-jm → 上传 → 30s 内 agent 日志显示 `⤓ 主面板推送指令` + 同步完成 |
-| **PR #5 节点脚本管理 UI** | 用户指示"做一个管理,用户可以自主清理删除上传到 vps 的脚本"。基础设施已 ready(`deployed_scripts` JSON + `pending_actions.delete`),只缺前端 UI + 1-2 个 backend endpoint。~2.5h |
-| **PR #6 外观完整版** | 用户选完整版(~5-6h):背景图 / logo / 标题。backend app_settings KV 表 + 文件上传 + 静态服务;frontend 设置→外观加品牌段 + Layout 应用 setting |
-| **5-25 09:00 jmcomic cron 真测** | 用户回复"B 实际上没有问题,我已经手动测试过了" — 视为已验证 |
-| **通知中心真测** | 用户已建 QQ 邮箱渠道,Ctrl+F5 拿新 dist `index-DCgPEn8u.js` 后用预设填好 → 点测试发送看是否真收到邮件;若失败排查 apprise URL 占位符是否替换干净 |
-| 第一个 demo 签到脚本选什么? | ✅ 已完成 `coklw`(生产真签到走通);下一个候选 bilibili-daily 验证标准通用性 |
-| 域名与 HTTPS 配置 | ✅ 已完成 `jb.aijiaxia.cc` → 154.9.238.144(2026-05-16) |
-| **JM v3 三层回退方案选型(已降优先级)** | ⏸ **暂搁置** — 5-24 v1.0 host 首跑成功(JCoin:30/EXP:100),v1.1 cookies 复用 + retry refactor 已上线,v1.2 manual 跳延迟由 sandbox_runner 平台层接管,**不再需要 v3 复杂方案**。详见 [设计/JM签到100%可靠性调研.md](设计/JM签到100%可靠性调研.md) |
+| **🎨 壁纸背景整屏统一(本分支 · 本会话)** | 🔄 外观(PR #8)壁纸只铺内容区,侧栏/顶栏纯色割裂 → 要铺满整个 app shell。**`AppLayout.tsx` 已有未提交 WIP**(另一会话 +41/−31)实现雏形:侧栏/顶栏半透明毛玻璃 + 背景上提根容器 + overlay z-0/内容 z-10。**待定边界后接管细化** |
+| **📱 手机端右侧白块 + 响应式收尾(本分支 · 本会话)** | 🔄 手机端最右侧大片白块(疑似溢出/未铺背景)。WIP 里 `<main>` 已加 `overflow-x-hidden`(注释称顺带修白块),待真机/preview 复现确认根治;Phase 2 polish(ScriptCard / 工具栏折行 / 44×44 触控)一并 |
+| **⏹ 运行取消 + 🗑 删除已上传脚本(本分支 · 另一会话)** | 🔄 取消等待/执行中 run(后端 `cancel_run` 已有)+ 删除 VPS 脚本(`deployed_scripts`/`pending_actions.delete` 已就绪,PR #6 OPEN)。⚠️ 另一会话做,**本会话不碰**;两会话共享工作树,留意 `AppLayout.tsx` 冲突 |
+| **⚠️ 两会话共享同一工作树** | 同一 `E:\签到脚本多合一` 两 Claude 会话并行,未提交改动互相可见。需约定边界(本会话:壁纸/手机;另一会话:取消/删除)避免覆盖 |
+| **JM 机器重启后 pending run** | 用户刚开机,有等待执行的 run。开机后 agent poll 到即跑;留意是否正常拉起 |
+| **通知中心真测** | 用户已建 QQ 邮箱渠道,用预设填好 → 点测试发送看是否真收到邮件;失败排查 apprise URL 占位符是否替换干净 |
+| ✅ ~~外观完整版~~ | **PR #8 已 merged**(`d6bf149`)。复用 `settings` KV 表 + base64 内联(非 app_settings 新表) |
+| ✅ ~~手机响应式核心~~ | GitHub **PR #7 仍 OPEN**,代码已随 PR #8 super-PR 进 main(`d6bf149`) |
+| ✅ ~~删除脚本基础设施~~ | GitHub **PR #6 仍 OPEN**(`fix/script-list-delete-with-files`,三点菜单「彻底删除含磁盘文件」),前端待另一会话收尾 |
+| ✅ ~~推送同步 + Inventory(PR #4)~~ + ~~code-review 14 fix(PR #9)~~ | 均已 merged(`16f7ee2` / `c585df0`,#9 含 XSS validator / dirty 守卫 / NaN clamp);docs PR #10 `9bfaaa9` |
+| ✅ ~~脚本同步 Pull(PR #3)~~ / ~~脚本上传 UX(PR #1)~~ / ~~JM agent cron 真测~~ | PR #3 `63ade4e` / PR #1 `604404f` 已 merged;JM 5-24 run 27 端到端真测成功(49 秒拿已签)+ 用户手动验证 OK |
+| **JM v3 三层回退方案选型(已降优先级)** | ⏸ **暂搁置** — v1.1 cookies 复用 + retry + v1.2 平台层跳延迟已够,**不再需要 v3**。详见 [设计/JM签到100%可靠性调研.md](设计/JM签到100%可靠性调研.md) |
 
 ## 交接备忘(给下一个 AI / 协作者)
 
 > 30 秒读完,你就能继续干活。
 
-1. **现在卡在哪**:后端 11/11 绿,批次 5 三 opus 前端 agent(5A 布局+鉴权页 / 5B 仪表盘 / 5C 脚本列表+详情)后台并行跑。等通知 → 集成 `pnpm build` → Claude Preview 本机闭环 → 部署 jb.aijiaxia.cc → 自测。可能要修 `components/common/` 共享区 agent 冲突(EmptyState/PageHeader/StatusBadge/ScriptCard 可能被多个 agent 同时写)。
-2. **上一步做了什么**(2026-05-16):
-   - 派出并完成 3 个 opus agent:Plan(React UI 设计稿)/ general-purpose(1C 后端骨架 88 文件)/ opus(coklw 脚本,分析 3.3MB HAR)
-   - 派出并完成 1 个 opus agent(末尾 403 限流但文件全落盘):1D 前端骨架 35 文件
-   - **手工 review verified**:
-     - 后端:`python -m uv venv --python 3.12`(注意!**uv 必须用 `python -m uv` 调,直接 `uv` 找不到**)→ `uv pip install --python .venv/Scripts/python.exe -e ".[dev]"` → `TestClient(app)` 跑 `/health` 200 + `/openapi.json` 200
-     - 前端:`pnpm install` ✓ → `pnpm build` ✓(1.9s,dist 299KB JS + 26KB CSS + Inter/JetBrainsMono 字体 self-hosted woff2)
-     - coklw:`python main.py` 空 cookie → 优雅打印 ERROR + 返回 RunResult JSON + exit 1
-   - **修了一个小 bug**:`frontend/src/api/client.ts` 的 openapi-fetch `onError` 返回类型不对(返回 unknown),改为 `Promise<void>`(只 sniff,不替换错误)
-   - 派出批次 2 三个 opus agent,但**用户休息前主动 TaskStop**(避免完成时打扰)
-3. **下一步要做什么**(用户回来直接做):
-   - **重派批次 2 三个 opus agent**(prompt 还在对话历史里 / 也可参照 [分支/main.md](分支/main.md) "批次 2"段重写):
-     - Backend-Models:8 张表 SQLAlchemy 2.x 模型 + Alembic 0001 迁移
-     - Backend-Auth:auth_service + auth API 6 端点 + AuthMiddleware + CSRFMiddleware + ErrorHandler
-     - Backend-Plugins:manifest 解析 + 字段类型 + scripts 扫描 + scripts API 6 端点
-   - 批次 2 完成 → 集成 review(端到端 TestClient:setup→login→scan→list scripts)
-   - 批次 5:Frontend-Auth-Pages + Frontend-Dashboard + Frontend-Scripts-List 三个前端页面 agent(并行)
-   - 集成 + 部署到 jb.aijiaxia.cc(scp + ssh + docker compose up)
-   - **估计到 MVP-1 上线还需 25-35 分钟**(假设 agent 都顺利,不再 403 限流)
+1. **现在卡在哪**(2026-05-30):项目早已过 MVP-5 + 远程 agent + 外观完整版,生产 `jb.aijiaxia.cc` 在跑。当前在前端分支 `feat/ui-fullbg-mobile-runcancel` 做体验改进:**壁纸整屏统一 + 手机端右侧白块**(本会话)/ **运行取消 + 删除脚本**(另一会话)。⚠️ **两会话共享同一工作树**,`AppLayout.tsx` 有未提交 WIP(壁纸统一雏形,+41/−31)。最新真实状态看本文件顶部「当前状态」+ [分支/feat-ui-fullbg-mobile-runcancel.md](分支/feat-ui-fullbg-mobile-runcancel.md)。
+2. **上一步做了什么**(2026-05-27 凌晨):PR #6/#9 解 main 冲突全 MERGEABLE → 用户随后 merge PR #9/#10 进 main(`9bfaaa9`)。PR #6(删脚本)/ PR #7(手机)仍 OPEN(#7 代码已随 #8 super-PR 进 main)。
+3. **下一步要做什么**:(a) 确认「壁纸/手机 vs 取消/删除」两会话边界,接管或细化 `AppLayout.tsx` WIP;(b) `pnpm build` + Claude Preview 本机验证壁纸铺满整屏 + 手机端无白块;(c) 部署:scp `frontend/dist` 到 `154.9.238.144:/opt/signin-panel/`(动后端才需 `docker compose build backend`);(d) 留意 JM 机器重启后的 pending run。
 4. **重要约束**(违反就回炉):
    - 阅读 `设计/后端架构.md` § 3、4、5 后再写后端代码
    - 阅读 `设计/前端UI设计.md` § 1、3 后再写前端组件

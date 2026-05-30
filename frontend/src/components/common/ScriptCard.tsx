@@ -15,11 +15,17 @@
  *   → 内部用 dotColorByStatus 自己映射
  */
 import { memo, type ComponentType } from 'react';
-import { Calendar, Clock, Layers, Play, Settings2, type LucideProps } from 'lucide-react';
+import { Calendar, Clock, Layers, MoreHorizontal, Play, Settings2, Trash2, type LucideProps } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { formatRelative } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
@@ -53,6 +59,8 @@ export interface ScriptCardProps {
   onTrigger?: (slug: string) => void;
   onConfigure?: (slug: string) => void;
   onClick?: (slug: string) => void;
+  /** 删除(logical=仅移除登记保留磁盘;full=彻底删含磁盘文件)。提供时卡片右下显示三点菜单 */
+  onDelete?: (mode: 'logical' | 'full') => void;
   /** 自定义 icon 组件,默认用脚本首字母 + chart-N 取色 */
   icon?: ComponentType<LucideProps>;
   className?: string;
@@ -121,6 +129,7 @@ function ScriptCardImpl({
   script,
   onTrigger,
   onConfigure,
+  onDelete,
   onClick,
   icon: Icon,
   className,
@@ -228,6 +237,43 @@ function ScriptCardImpl({
           {statusLabel(script.last_run_status)}
         </Badge>
         <div className="flex items-center gap-1.5">
+          {onDelete ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="size-8 p-0"
+                  aria-label="更多操作"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <MoreHorizontal className="size-4" strokeWidth={1.75} />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                <DropdownMenuItem
+                  className="text-danger focus:text-danger"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete('logical');
+                  }}
+                >
+                  <Trash2 className="mr-2 size-3.5" strokeWidth={1.75} />
+                  移除登记(保留文件)
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="text-danger focus:text-danger"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete('full');
+                  }}
+                >
+                  <Trash2 className="mr-2 size-3.5" strokeWidth={1.75} />
+                  彻底删除(含磁盘文件)
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
           {onConfigure ? (
             <Button
               variant="ghost"

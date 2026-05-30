@@ -219,7 +219,7 @@ __RUN_RESULT__{"success":true,"message":"今日已签到过了: finished","data"
    ├ instances: 3 个(JM-US8-8特价 node_id=2 ⭐ run 27 last_run=success)
    └ frontend dist: index-LyGbdOtx.js(节点页 + 实例下拉 + never_run 状态)
 
-✅ VPS-JM (38.55.132.186)
+✅ VPS-JM (198.51.100.10)
    ├ signin-agent systemd active running (TasksMax 4096,MemoryMax 2G)
    ├ heartbeat 200 OK / poll 200 OK
    ├ scripts/jmcomic/main.py(v1.2 含 trigger_type check + 平台层 sandbox 也兜底)

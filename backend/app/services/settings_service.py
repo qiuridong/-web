@@ -41,6 +41,13 @@ DEFAULT_SETTINGS: dict[str, dict[str, Any]] = {
         "is_secret": False,
         "validator": lambda v: isinstance(v, int) and 1 <= v <= 3650,
     },
+    "runs_autoclean_enabled": {
+        "default": False,
+        "type": "bool",
+        "description": "是否启用执行记录定时自动清理(每日按 retention_days 删旧 run)",
+        "is_secret": False,
+        "validator": lambda v: isinstance(v, bool),
+    },
     "timezone": {
         "default": "Asia/Shanghai",
         "type": "str",

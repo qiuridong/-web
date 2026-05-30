@@ -73,6 +73,8 @@ _BUILTIN_JOBS = {
     "tasks:scan_scripts": "scripts/ 周期扫描",
     "tasks:resume_paused": "paused_until 到期恢复",
     "tasks:housekeeping": "session 过期 / 杂项清理",
+    "tasks:node_health": "节点掉线检测 + 通知",
+    "tasks:cleanup_runs": "执行记录定时清理(按需启用)",
 }
 
 
@@ -496,7 +498,9 @@ class SchedulerService:
 
     def _register_builtin_tasks(self) -> None:
         """注册周期内置任务。"""
+        from app.tasks.cleanup_runs import run_cleanup_runs_task  # noqa: PLC0415
         from app.tasks.housekeeping import housekeeping_job  # noqa: PLC0415
+        from app.tasks.node_health import node_health_job  # noqa: PLC0415
         from app.tasks.resume_paused import resume_paused_job  # noqa: PLC0415
         from app.tasks.scan_scripts import scan_scripts_job  # noqa: PLC0415
 
@@ -528,6 +532,26 @@ class SchedulerService:
             id="tasks:housekeeping",
             replace_existing=True,
             misfire_grace_time=120,
+            coalesce=True,
+        )
+
+        # node_health — 每分钟扫节点掉线 + 告警(async job,await dispatch)
+        self.scheduler.add_job(
+            node_health_job,
+            trigger=IntervalTrigger(minutes=1),
+            id="tasks:node_health",
+            replace_existing=True,
+            misfire_grace_time=60,
+            coalesce=True,
+        )
+
+        # cleanup_runs — 每天扫一次,删 retention_days 外旧 run(仅当 runs_autoclean_enabled)
+        self.scheduler.add_job(
+            run_cleanup_runs_task,
+            trigger=IntervalTrigger(hours=24),
+            id="tasks:cleanup_runs",
+            replace_existing=True,
+            misfire_grace_time=3600,
             coalesce=True,
         )
 

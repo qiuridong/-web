@@ -75,6 +75,13 @@ class ScriptListItem(BaseModel):
     enabled: bool
     requires_secret: bool = False
     instance_count: int = 0
+    instance_enabled_count: int = 0
+    # 脚本级执行聚合(从其实例的冗余字段汇总;无运行则为 None/0 → 前端"尚未执行")
+    last_run_at: datetime | None = None
+    next_run_at: datetime | None = None
+    last_run_status: str | None = None
+    total_runs: int = 0
+    total_successes: int = 0
     last_scanned_at: datetime
 
 
@@ -104,6 +111,13 @@ class ScriptDetail(BaseModel):
     enabled: bool
     requires_secret: bool = False
     instance_count: int = 0
+    instance_enabled_count: int = 0
+    # 脚本级执行聚合(同列表)
+    last_run_at: datetime | None = None
+    next_run_at: datetime | None = None
+    last_run_status: str | None = None
+    total_runs: int = 0
+    total_successes: int = 0
     manifest_path: str
     manifest_hash: str
     last_scanned_at: datetime

@@ -42,7 +42,12 @@ export interface NodeListItem {
   updated_at: string;
 }
 
-export type NodeDetail = NodeListItem;
+export interface NodeDetail extends NodeListItem {
+  /** agent 上报的已部署脚本 {slug: {sha256, deployed_at}} */
+  deployed_scripts?: Record<string, { sha256?: string; deployed_at?: string }>;
+  /** 待 agent 执行的指令(sync 拉取 / delete 删除) */
+  pending_actions?: { sync?: string[]; delete?: string[] };
+}
 
 export interface NodeListResponse {
   items: NodeListItem[];
@@ -160,6 +165,19 @@ async function regenerateToken(id: number): Promise<NodeTokenResponse> {
   return data as unknown as NodeTokenResponse;
 }
 
+async function uninstallNodeScript(nodeId: number, slug: string): Promise<void> {
+  const { error, response } = await apiClient.POST(
+    `/api/v1/nodes/${nodeId}/deployed-scripts/${encodeURIComponent(slug)}/uninstall` as never,
+    {} as never,
+  );
+  if (error) {
+    throw Object.assign(new Error(formatError(error)), {
+      status: response?.status,
+      detail: error,
+    });
+  }
+}
+
 // ====================== Query keys ======================
 
 export const nodesQueryKeys = {
@@ -236,6 +254,23 @@ export function useRegenerateNodeToken(): UseMutationResult<NodeTokenResponse, E
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: nodesQueryKeys.all });
       // token 由 NodeList Dialog 显示
+    },
+  });
+}
+
+/** POST /api/v1/nodes/{id}/deployed-scripts/{slug}/uninstall — 下发删除指令给 agent */
+export function useUninstallNodeScript(): UseMutationResult<
+  void,
+  Error,
+  { nodeId: number; slug: string }
+> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ nodeId, slug }) => uninstallNodeScript(nodeId, slug),
+    onSuccess: (_, { nodeId }) => {
+      void qc.invalidateQueries({ queryKey: nodesQueryKeys.detail(nodeId) });
+      void qc.invalidateQueries({ queryKey: nodesQueryKeys.all });
+      toast.success('已下发删除指令,agent 下次拉取(最长 30s)时删除并回报');
     },
   });
 }

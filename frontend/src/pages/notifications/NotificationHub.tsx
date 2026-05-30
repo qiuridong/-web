@@ -958,7 +958,11 @@ function RuleSheet({ open, onOpenChange, rule }: RuleSheetProps) {
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label>作用域</Label>
-              <Select value={scope} onValueChange={(v) => setScope(v as NotificationScope)}>
+              <Select
+                value={scope}
+                onValueChange={(v) => setScope(v as NotificationScope)}
+                disabled={event === 'node_offline'}
+              >
                 <SelectTrigger className="h-10">
                   <SelectValue />
                 </SelectTrigger>
@@ -971,16 +975,29 @@ function RuleSheet({ open, onOpenChange, rule }: RuleSheetProps) {
             </div>
             <div className="space-y-1.5">
               <Label>事件</Label>
-              <Select value={event} onValueChange={(v) => setEvent(v as NotificationEvent)}>
+              <Select
+                value={event}
+                onValueChange={(v) => {
+                  const ev = v as NotificationEvent;
+                  setEvent(ev);
+                  // 节点事件固定全局(后端只匹配 scope=global 的 node 规则)
+                  if (ev === 'node_offline') {
+                    setScope('global');
+                    setScriptId(undefined);
+                    setInstanceId(undefined);
+                  }
+                }}
+              >
                 <SelectTrigger className="h-10">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="max-h-[280px]">
-                  <SelectItem value="any">任意</SelectItem>
+                  <SelectItem value="any">任意(运行)</SelectItem>
                   <SelectItem value="success">成功</SelectItem>
                   <SelectItem value="failure">失败</SelectItem>
                   <SelectItem value="error">错误</SelectItem>
                   <SelectItem value="timeout">超时</SelectItem>
+                  <SelectItem value="node_offline">🔌 节点掉线</SelectItem>
                 </SelectContent>
               </Select>
             </div>

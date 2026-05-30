@@ -380,3 +380,51 @@ def is_node_online(node: Node, threshold_seconds: int = 60) -> bool:
         last = last.replace(tzinfo=timezone.utc)
     delta = (_utcnow() - last).total_seconds()
     return delta < threshold_seconds
+
+
+def node_deployed_scripts(node: Node) -> dict[str, dict[str, Any]]:
+    """deployed_scripts_json → dict;非法 JSON 返回 {}。agent 上报的已部署脚本事实源。"""
+    if not node.deployed_scripts:
+        return {}
+    try:
+        d = json.loads(node.deployed_scripts)
+        if isinstance(d, dict):
+            return d
+    except json.JSONDecodeError:
+        pass
+    return {}
+
+
+def node_pending_actions(node: Node) -> dict[str, list[str]]:
+    """pending_actions_json → {"sync": [...], "delete": [...]};非法返回空两键。"""
+    out: dict[str, list[str]] = {"sync": [], "delete": []}
+    if not node.pending_actions:
+        return out
+    try:
+        d = json.loads(node.pending_actions)
+        if isinstance(d, dict):
+            out["sync"] = [str(s) for s in d.get("sync", []) if isinstance(s, str)]
+            out["delete"] = [str(s) for s in d.get("delete", []) if isinstance(s, str)]
+    except json.JSONDecodeError:
+        pass
+    return out
+
+
+def request_uninstall_script(db: Session, node_id: int, slug: str) -> None:
+    """把 slug append 到节点 pending_actions.delete(去重)→ agent 下次 poll 拉到后 rm 本地 scripts/<slug>/。
+
+    本地节点不适用(脚本在主面板,走 /scripts 删)。
+    """
+    node = get_node_by_id(db, node_id)
+    if node.is_local:
+        raise ValidationError("本地节点的脚本请在「脚本」页删除,无需下发到 agent")
+    current = node_pending_actions(node)
+    if slug not in current["delete"]:
+        current["delete"].append(slug)
+    node.pending_actions = json.dumps(
+        {"sync": current["sync"], "delete": current["delete"]},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    db.flush()
+    logger.info("节点 {} 下发删除脚本指令: {}", node.slug, slug)

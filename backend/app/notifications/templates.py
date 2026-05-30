@@ -52,6 +52,14 @@ DEFAULT_BODY_TEMPLATE = """脚本: {{ script.name }} ({{ script.slug }})
 {% endif %}"""
 
 
+# 节点掉线事件默认模板(node 上下文,与 run 模板分开)
+DEFAULT_NODE_OFFLINE_TITLE = "⚠️ 节点掉线: {{ node.name or node.slug }}"
+
+DEFAULT_NODE_OFFLINE_BODY = """节点 **{{ node.name or node.slug }}** (`{{ node.slug }}`) 已离线。
+最后心跳: {{ node.last_seen_at | local_time }}
+请检查该 VPS 上 signin-agent 是否在运行(journalctl -u signin-agent -f)。"""
+
+
 # ============================================================
 # 自定义 filter
 # ============================================================
@@ -234,6 +242,38 @@ def build_context(
         "instance": _dump_instance(instance),
         "run": _dump_run(run),
     }
+
+
+def build_node_context(*, node: Any, event: str) -> dict[str, Any]:
+    """节点事件(node_offline 等)的模板上下文。
+
+    提供 ``node`` + 占位的 script/instance/run(防 StrictUndefined 误用 run 模板炸)。
+    """
+    return {
+        "event": event,
+        "node": {
+            "id": getattr(node, "id", None),
+            "slug": getattr(node, "slug", "") or "",
+            "name": getattr(node, "name", "") or "",
+            "last_seen_at": _iso(getattr(node, "last_seen_at", None)),
+            "version": getattr(node, "version", None),
+        },
+        "script": _dump_script(None),
+        "instance": _dump_instance(None),
+        "run": _dump_run(None),
+    }
+
+
+def render_node_notification(
+    template_str: str | None, ctx: dict[str, Any]
+) -> tuple[str, str]:
+    """节点事件渲染:template 空 → node-offline 默认模板;否则用用户自定义模板。"""
+    if not template_str or not template_str.strip():
+        return (
+            _render_one(DEFAULT_NODE_OFFLINE_TITLE, ctx),
+            _render_one(DEFAULT_NODE_OFFLINE_BODY, ctx),
+        )
+    return render_notification(template_str, ctx)
 
 
 def _dump_script(script: Any) -> dict[str, Any]:

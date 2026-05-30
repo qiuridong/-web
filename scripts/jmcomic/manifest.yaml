@@ -18,7 +18,7 @@ description: |
   - **Linux 节点 + root/sudo 权限**(自动装 xvfb / Chrome / chromedriver)
   - 磁盘 ≥ 500 MB / 内存 ≥ 1.5 GB / Python 3.10+
   - **不能在主面板 Docker 容器里跑**(没 Chrome 环境)
-  - 需要 MVP-1 远程 agent 派发到 host Linux 节点(如 VPS-JM `38.55.132.186`,原脚本节点)
+  - 需要 MVP-1 远程 agent 派发到 host Linux 节点(如 VPS-JM `198.51.100.10`,原脚本节点)
   - 验证过 100% 工作的节点:VPS-JM(2026-04-18 ~ 2026-05-22 共 33 天 / 33 次 CF 全过 ✅)
 
   ## 失效信号 → 处理

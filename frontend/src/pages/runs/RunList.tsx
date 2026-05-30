@@ -90,6 +90,7 @@ import {
   type RunsFilter,
 } from '@/api/hooks/runs';
 import { useScripts } from '@/api/hooks/scripts';
+import { useSettings, useUpdateSetting } from '@/api/hooks/settings';
 import { formatDate, formatDuration, formatRelative } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
@@ -238,6 +239,10 @@ export function RunList() {
   // 操作 mutations
   const cancel = useCancelRun();
   const cleanup = useCleanupRuns();
+  const { data: settingsMap } = useSettings();
+  const updateSetting = useUpdateSetting();
+  const autoCleanEnabled = Boolean(settingsMap?.runs_autoclean_enabled?.value);
+  const autoCleanDays = String(settingsMap?.retention_days?.value ?? 30);
 
   // 清理对话框
   const [cleanupOpen, setCleanupOpen] = useState(false);
@@ -588,8 +593,51 @@ export function RunList() {
               将删除指定天数之前的所有记录(含 stdout / stderr)。该操作不可恢复。
             </AlertDialogDescription>
           </AlertDialogHeader>
+
+          {/* 定时自动清理(持久化到 settings,每天后台执行,防日志堆满)*/}
+          <div className="rounded-md border border-border bg-muted/30 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">定时自动清理</p>
+                <p className="text-xs text-muted-foreground">
+                  开启后每天自动删除「保留天数」之前的记录,长期不管也不会堆满。
+                </p>
+              </div>
+              <Switch
+                checked={autoCleanEnabled}
+                disabled={updateSetting.isPending}
+                onCheckedChange={(v) =>
+                  updateSetting.mutate({ key: 'runs_autoclean_enabled', value: v })
+                }
+                aria-label="定时自动清理开关"
+              />
+            </div>
+            {autoCleanEnabled && (
+              <div className="mt-3 flex items-center gap-2">
+                <Label className="shrink-0 text-xs text-muted-foreground">自动保留</Label>
+                <Select
+                  value={autoCleanDays}
+                  onValueChange={(v) =>
+                    updateSetting.mutate({ key: 'retention_days', value: Number(v) })
+                  }
+                >
+                  <SelectTrigger className="h-9 w-28">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="7">7 天</SelectItem>
+                    <SelectItem value="14">14 天</SelectItem>
+                    <SelectItem value="30">30 天</SelectItem>
+                    <SelectItem value="60">60 天</SelectItem>
+                    <SelectItem value="90">90 天</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+
           <div className="py-2">
-            <Label className="mb-2 block text-sm">保留最近</Label>
+            <Label className="mb-2 block text-sm">手动 · 立即清理,保留最近</Label>
             <Select value={keepDays} onValueChange={setKeepDays}>
               <SelectTrigger className="h-10 w-full">
                 <SelectValue />

@@ -32,7 +32,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 # 共用枚举
 # ============================================================
 ScopeType = Literal["global", "script", "instance"]
-EventType = Literal["success", "failure", "error", "timeout", "any"]
+EventType = Literal["success", "failure", "error", "timeout", "any", "node_offline"]
 
 
 # ============================================================

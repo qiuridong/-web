@@ -72,6 +72,7 @@ import PageHeader from '@/components/common/PageHeader';
 import { ScriptCard, type ScriptCardData } from '@/components/common/ScriptCard';
 import UploadScriptDialog from './components/UploadScriptDialog';
 
+import { useScriptFullDelete } from '@/api/hooks/useScriptFiles';
 import {
   useDeleteScript,
   useDisableScript,
@@ -114,9 +115,15 @@ export function ScriptList() {
   const enable = useEnableScript();
   const disable = useDisableScript();
   const remove = useDeleteScript();
+  const removeFull = useScriptFullDelete();
 
   // === 删除二次确认 ===
-  const [deleteTarget, setDeleteTarget] = useState<ScriptListItem | null>(null);
+  // mode='logical' → useDeleteScript(仅删 DB,保留磁盘文件,下次 scan 又会发现)
+  // mode='full'    → useScriptFullDelete(删 DB + 磁盘文件,真正消失,不可恢复)
+  const [deleteTarget, setDeleteTarget] = useState<
+    { script: ScriptListItem; mode: 'logical' | 'full' } | null
+  >(null);
+  const deleting = remove.isPending || removeFull.isPending;
 
   // === 上传 Dialog ===
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -245,7 +252,7 @@ export function ScriptList() {
                     enable.mutate(s.slug);
                   }
                 }}
-                onDelete={() => setDeleteTarget(s)}
+                onDelete={(mode) => setDeleteTarget({ script: s, mode })}
               />
             </div>
           );
@@ -400,6 +407,7 @@ export function ScriptList() {
           onView={(slug) => navigate(`/scripts/${slug}`)}
           onRun={(slug) => navigate(`/scripts/${slug}?tab=instances`)}
           onConfigure={(slug) => navigate(`/scripts/${slug}`)}
+          onDelete={(s, mode) => setDeleteTarget({ script: s, mode })}
         />
       ) : (
         <DataTable<ScriptListItem, unknown>
@@ -417,7 +425,7 @@ export function ScriptList() {
         />
       )}
 
-      {/* 删除二次确认 */}
+      {/* 删除二次确认 — 根据 mode 显示不同文案 + 调对应 hook */}
       <AlertDialog
         open={!!deleteTarget}
         onOpenChange={(open) => {
@@ -431,37 +439,55 @@ export function ScriptList() {
                 className="size-5 text-danger"
                 strokeWidth={1.75}
               />
-              确认从登记中移除「{deleteTarget?.name}」?
+              {deleteTarget?.mode === 'full'
+                ? `彻底删除「${deleteTarget?.script.name}」?`
+                : `从登记中移除「${deleteTarget?.script.name}」?`}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              将级联删除此脚本下的所有实例与运行记录。
-              <strong className="ml-1 text-foreground">
-                磁盘文件不会被删除
-              </strong>
-              ,下次扫描仍可重新发现。
+              {deleteTarget?.mode === 'full' ? (
+                <>
+                  将级联删除此脚本下的所有实例与运行记录,
+                  <strong className="ml-1 text-foreground">
+                    并永久删除磁盘文件
+                  </strong>
+                  (<code className="font-mono text-[11px]">scripts/{deleteTarget?.script.slug}/</code>
+                  )。<strong className="text-danger">此操作不可恢复</strong>。
+                </>
+              ) : (
+                <>
+                  将级联删除此脚本下的所有实例与运行记录。
+                  <strong className="ml-1 text-foreground">
+                    磁盘文件保留
+                  </strong>
+                  ,下次扫描仍可重新发现(适用临时下架)。
+                </>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={remove.isPending}>
+            <AlertDialogCancel disabled={deleting}>
               取消
             </AlertDialogCancel>
             <AlertDialogAction
               className="bg-danger text-danger-foreground hover:bg-danger/90"
-              disabled={remove.isPending}
+              disabled={deleting}
               onClick={(e) => {
                 e.preventDefault();
                 if (!deleteTarget) return;
-                remove.mutate(deleteTarget.slug, {
+                const slug = deleteTarget.script.slug;
+                const mutation =
+                  deleteTarget.mode === 'full' ? removeFull : remove;
+                mutation.mutate(slug, {
                   onSuccess: () => setDeleteTarget(null),
                 });
               }}
             >
-              {remove.isPending ? (
+              {deleting ? (
                 <Loader2 className="mr-1.5 size-4 animate-spin" strokeWidth={1.75} />
               ) : (
                 <Trash2 className="mr-1.5 size-4" strokeWidth={1.75} />
               )}
-              确认移除
+              {deleteTarget?.mode === 'full' ? '彻底删除' : '确认移除'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -481,6 +507,7 @@ interface ScriptCardGridProps {
   onView: (slug: string) => void;
   onRun: (slug: string) => void;
   onConfigure: (slug: string) => void;
+  onDelete?: (script: ScriptListItem, mode: 'logical' | 'full') => void;
 }
 
 function ScriptCardGrid({
@@ -489,6 +516,7 @@ function ScriptCardGrid({
   onView,
   onRun,
   onConfigure,
+  onDelete,
 }: ScriptCardGridProps) {
   if (loading) {
     return (
@@ -511,6 +539,7 @@ function ScriptCardGrid({
           onClick={onView}
           onTrigger={onRun}
           onConfigure={onConfigure}
+          onDelete={onDelete ? (mode) => onDelete(s, mode) : undefined}
         />
       ))}
     </div>
@@ -596,7 +625,8 @@ interface ScriptRowMenuProps {
   script: ScriptListItem;
   onView: () => void;
   onToggle: () => void;
-  onDelete: () => void;
+  /** 'logical' = 软删(仅 DB);'full' = 硬删(DB + 磁盘文件,不可恢复) */
+  onDelete: (mode: 'logical' | 'full') => void;
 }
 
 function ScriptRowMenu({
@@ -668,11 +698,21 @@ function ScriptRowMenu({
           className="text-danger focus:text-danger"
           onClick={(e) => {
             e.stopPropagation();
-            onDelete();
+            onDelete('logical');
           }}
         >
           <Trash2 className="mr-2 size-3.5" strokeWidth={1.75} />
-          移除登记
+          移除登记(保留文件)
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className="text-danger focus:text-danger"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete('full');
+          }}
+        >
+          <Trash2 className="mr-2 size-3.5" strokeWidth={1.75} />
+          彻底删除(含磁盘文件)
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

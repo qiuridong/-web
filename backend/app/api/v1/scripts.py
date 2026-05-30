@@ -78,10 +78,16 @@ def list_scripts(
             default_cron=s.default_cron,
             enabled=s.enabled,
             requires_secret=s.requires_secret,
-            instance_count=instance_count,
+            instance_count=stats["instance_count"],
+            instance_enabled_count=stats["instance_enabled_count"],
+            last_run_at=stats["last_run_at"],
+            next_run_at=stats["next_run_at"],
+            last_run_status=stats["last_run_status"],
+            total_runs=stats["total_runs"],
+            total_successes=stats["total_successes"],
             last_scanned_at=s.last_scanned_at,
         )
-        for s, instance_count in items
+        for s, stats in items
     ]
 
     return ScriptListResponse(

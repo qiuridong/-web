@@ -209,6 +209,17 @@ export const TEMPLATE_PRESETS: TemplatePreset[] = [
 {% if run.result_message %}{{ run.result_message }}{% endif %}`,
     description: '只在「成功」事件触发时用,告诉你今天还活着即可。',
   },
+  {
+    id: 'node-offline',
+    label: '🔌 节点掉线告警(配合「节点掉线」事件)',
+    content: `⚠️ 节点掉线: {{ node.name or node.slug }}
+---
+节点 **{{ node.name or node.slug }}** (\`{{ node.slug }}\`) 已离线。
+最后心跳: {{ node.last_seen_at | local_time }}
+请检查该 VPS 上 signin-agent 是否在运行。`,
+    description:
+      '仅用于「节点掉线」事件(作用域固定全局)。可用字段:node.slug / node.name / node.last_seen_at / node.version。留空也行,系统有内置默认模板。',
+  },
 ];
 
 // ============================================================
@@ -224,7 +235,7 @@ export const TEMPLATE_FIELD_GROUPS: FieldGroup[] = [
   {
     label: '事件',
     fields: [
-      { name: '{{ event }}', note: 'success / failure / error / timeout / any' },
+      { name: '{{ event }}', note: 'success / failure / error / timeout / any / node_offline' },
     ],
   },
   {
@@ -263,6 +274,15 @@ export const TEMPLATE_FIELD_GROUPS: FieldGroup[] = [
       { name: '{{ run.stderr }}' },
       { name: '{{ run.trigger_type }}', note: 'manual / scheduled / retry' },
       { name: '{{ run.host }}', note: '节点名,如 local / vps-jm' },
+    ],
+  },
+  {
+    label: '节点(node — 仅「节点掉线」事件)',
+    fields: [
+      { name: '{{ node.slug }}', note: '节点唯一标识,如 vps-jm' },
+      { name: '{{ node.name }}', note: '节点显示名' },
+      { name: '{{ node.last_seen_at }}', note: '最后心跳 ISO,搭配 local_time' },
+      { name: '{{ node.version }}', note: 'agent 版本' },
     ],
   },
   {
