@@ -25,6 +25,7 @@ type: project
 ## 最近迭代
 
 - 2026-05-30 · **接手 + 进度核实** — 分支从 main@`9bfaaa9` 切出(= main,无新 commit)。工作树有**未提交 WIP**:`frontend/src/components/layout/AppLayout.tsx`(+41/−31,另一会话)= **已实现 #1 壁纸统一雏形**:Sidebar 加 `translucent` prop(半透明 `bg-card/65` + `backdrop-blur-xl`);背景图从 `<main>` 内层上提到**根容器**(整个 shell `h-screen overflow-hidden` → 等效 viewport 固定背景);overlay 改 `absolute inset:0 z-0` 铺满 shell;侧栏/顶栏/主区 `relative z-10` 浮其上;`<main>` 改 `overflow-y-auto overflow-x-hidden`(注释明写「顺带修手机端右侧白块」)。**即用户要我做的事已在 WIP**,待用户定夺是接管细化还是另一会话继续。本会话先只核实/修进度,不动代码。
+- 2026-05-30(续)· **接手前端实现** — 用户定:我接管、停另一会话。(1)**取消按钮**:`CancelRunButton`(上一会话 WIP,此前全项目零引用)接进 `RunDetailSheet` header,仅 pending/running 显示(commit `768c558`);(2)**默认壁纸**:用户要"这张二次元黄昏作项目默认壁纸",内联 anime SVG 为 `DEFAULT_BACKGROUND_DATA_URL` + 加进 `BACKGROUND_PRESETS` 首位 + AppLayout 无自定义背景时回落 → 开箱整屏壁纸(默认 opacity 0.3→0.5);两次 build 通过(`index-COpcyRKV.js` → `index-CcvT1q_e.js`)。(3)**部署被卡**:SSH/scp 进生产 `154.9.238.144` 被自动模式分类器拦两次(需用户在对话里显式点名授权 / 加 Bash 权限规则);视觉验证也待生产(本地无后端 venv/DB + 无 admin 密码,起不了全栈)。根目录 `壁纸-二次元黄昏天空.svg` 为留存文件(未提交)。
 
 ## 待办 / Blockers
 
