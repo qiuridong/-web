@@ -407,6 +407,7 @@ export function ScriptList() {
           onView={(slug) => navigate(`/scripts/${slug}`)}
           onRun={(slug) => navigate(`/scripts/${slug}?tab=instances`)}
           onConfigure={(slug) => navigate(`/scripts/${slug}`)}
+          onDelete={(s, mode) => setDeleteTarget({ script: s, mode })}
         />
       ) : (
         <DataTable<ScriptListItem, unknown>
@@ -506,6 +507,7 @@ interface ScriptCardGridProps {
   onView: (slug: string) => void;
   onRun: (slug: string) => void;
   onConfigure: (slug: string) => void;
+  onDelete?: (script: ScriptListItem, mode: 'logical' | 'full') => void;
 }
 
 function ScriptCardGrid({
@@ -514,6 +516,7 @@ function ScriptCardGrid({
   onView,
   onRun,
   onConfigure,
+  onDelete,
 }: ScriptCardGridProps) {
   if (loading) {
     return (
@@ -536,6 +539,7 @@ function ScriptCardGrid({
           onClick={onView}
           onTrigger={onRun}
           onConfigure={onConfigure}
+          onDelete={onDelete ? (mode) => onDelete(s, mode) : undefined}
         />
       ))}
     </div>
