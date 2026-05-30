@@ -126,6 +126,9 @@ def run_cleanup_runs_task() -> None:
     """
     db = SessionLocal()
     try:
+        # 仅当用户在设置里开启「自动清理」才执行;否则跳过(手动清理走 API,不受此开关影响)
+        if not bool(settings_service.get(db, "runs_autoclean_enabled", False)):
+            return
         run_cleanup_with_session(db)
     except Exception as exc:  # noqa: BLE001
         logger.exception("cleanup_runs 任务异常 err={}", exc)
