@@ -62,7 +62,7 @@ import {
 import { useUIStore } from '@/stores/ui.store';
 import { useAuthStore } from '@/stores/auth.store';
 import { useCurrentUser, useLogout, meToAuthUser } from '@/api/hooks/auth';
-import { useAppearance, DEFAULT_APPEARANCE } from '@/api/hooks/appearance';
+import { useAppearance, DEFAULT_APPEARANCE, DEFAULT_BACKGROUND_DATA_URL } from '@/api/hooks/appearance';
 import { cn } from '@/lib/utils';
 import { CommandPalette } from '@/components/common/CommandPalette';
 
@@ -482,10 +482,13 @@ export function AppLayout() {
   // 根容器 h-screen + overflow-hidden,所以背景等效 viewport 固定;内容在 <main>
   // 内独立滚动,壁纸始终铺满整屏,任何空隙/溢出露出的都是壁纸(不再是白底,
   // 顺带修手机端右侧白块)。
-  const hasBackground = !!app.background_image_data_url;
+  // 无自定义背景图时回落到项目默认壁纸(二次元黄昏)→ "整屏壁纸"成为开箱默认观感。
+  const effectiveBackgroundUrl =
+    app.background_image_data_url || DEFAULT_BACKGROUND_DATA_URL;
+  const hasBackground = !!effectiveBackgroundUrl; // 始终 true:总有默认壁纸兜底
   const backgroundWrapperStyle: React.CSSProperties = hasBackground
     ? {
-        backgroundImage: `url("${app.background_image_data_url}")`,
+        backgroundImage: `url("${effectiveBackgroundUrl}")`,
         backgroundSize: 'cover',
         backgroundPosition: 'center',
         backgroundRepeat: 'no-repeat',

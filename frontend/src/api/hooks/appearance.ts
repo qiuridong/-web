@@ -60,7 +60,8 @@ export const DEFAULT_APPEARANCE: AppearanceData = {
   logo_image_data_url: '',
   background_image_data_url: '',
   background_blur: 0,
-  background_opacity: 0.3,
+  // 默认壁纸(二次元黄昏)较亮,overlay 0.5 既能看清壁纸又保证内容可读
+  background_opacity: 0.5,
   background_blend_mode: 'normal',
 };
 
@@ -222,8 +223,24 @@ function svgToDataUrl(svg: string): string {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg.trim())}`;
 }
 
-/** 6 张内置背景(SVG 渐变 / 几何 / 暗系)— 无需用户上传即可一键应用 */
+/**
+ * 项目默认壁纸 — anime 风格黄昏天空(渐变天空 + 夕阳光晕 + 星星 + 远山剪影)。
+ * 无自定义背景图时 AppLayout 回落到这张,让"整屏壁纸"成为开箱默认观感。
+ * 内联 SVG ~1.5KB,体积可忽略。
+ */
+const ANIME_DUSK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice"><defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#1d0f47"/><stop offset="34%" stop-color="#553691"/><stop offset="60%" stop-color="#bf5690"/><stop offset="82%" stop-color="#f4926b"/><stop offset="100%" stop-color="#ffd9a0"/></linearGradient><radialGradient id="sunGlow" cx="50%" cy="78%" r="30%"><stop offset="0%" stop-color="#fff4d8" stop-opacity="0.95"/><stop offset="45%" stop-color="#ffd190" stop-opacity="0.55"/><stop offset="100%" stop-color="#ffd190" stop-opacity="0"/></radialGradient><linearGradient id="hillFar" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#33205e"/><stop offset="100%" stop-color="#1a1036"/></linearGradient></defs><rect width="1920" height="1080" fill="url(#sky)"/><g fill="#fff"><circle cx="220" cy="120" r="2.2" opacity="0.9"/><circle cx="470" cy="78" r="1.6" opacity="0.7"/><circle cx="760" cy="158" r="1.8" opacity="0.8"/><circle cx="980" cy="60" r="1.4" opacity="0.6"/><circle cx="1185" cy="104" r="1.5" opacity="0.6"/><circle cx="1325" cy="205" r="1.4" opacity="0.5"/><circle cx="1485" cy="150" r="2.4" opacity="0.9"/><circle cx="1705" cy="92" r="1.6" opacity="0.7"/><circle cx="360" cy="232" r="1.4" opacity="0.5"/></g><circle cx="960" cy="846" r="540" fill="url(#sunGlow)"/><circle cx="960" cy="846" r="118" fill="#fff1cf" opacity="0.96"/><g fill="#fff" opacity="0.16"><ellipse cx="520" cy="430" rx="360" ry="32"/><ellipse cx="1400" cy="358" rx="300" ry="26"/><ellipse cx="1080" cy="520" rx="440" ry="28"/></g><g fill="#3a2360" opacity="0.22"><ellipse cx="700" cy="600" rx="520" ry="24"/><ellipse cx="1500" cy="650" rx="380" ry="22"/></g><path d="M0 980 L0 762 Q300 702 560 782 Q820 860 1080 772 Q1380 662 1660 782 Q1820 850 1920 802 L1920 1080 L0 1080 Z" fill="url(#hillFar)"/><path d="M0 1080 L0 902 Q480 842 960 922 Q1440 1002 1920 912 L1920 1080 Z" fill="#0e0922" opacity="0.92"/></svg>`;
+
+export const DEFAULT_BACKGROUND_DATA_URL = svgToDataUrl(ANIME_DUSK_SVG);
+
+/** 内置背景(SVG 渐变 / 几何 / 暗系)— 无需用户上传即可一键应用。首张 = 项目默认壁纸 */
 export const BACKGROUND_PRESETS: BackgroundPreset[] = [
+  {
+    id: 'anime-dusk',
+    name: '二次元黄昏',
+    thumb:
+      'linear-gradient(180deg, #1d0f47 0%, #553691 34%, #bf5690 60%, #f4926b 82%, #ffd9a0 100%)',
+    dataUrl: DEFAULT_BACKGROUND_DATA_URL,
+  },
   {
     id: 'aurora-purple',
     name: '极光紫',
