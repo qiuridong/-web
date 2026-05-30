@@ -27,8 +27,10 @@ type: index
 - **SSH 用户**:`root`
 - **SSH 密钥(本地)**:`J:\密钥\美国质量8-8\vcs-deploy-rsa`(OpenSSH RSA 私钥)
 - **连接命令**:`ssh -i "J:\密钥\美国质量8-8\vcs-deploy-rsa" root@154.9.238.144`
-- **部署目录**(规划):`/opt/signin-panel`
-- **生产 URL**(部署后):`https://jb.aijiaxia.cc`
+- **部署目录**:`/opt/signin-panel`(后端 docker;前端静态 dist 在 `/opt/signin-panel/frontend/dist`,host nginx serve)
+- **生产 URL**:`https://jb.aijiaxia.cc`
+- **✅ 用户已授权 ssh/scp 到 `154.9.238.144` 部署 frontend dist**(2026-05-30)。前端部署惯例:本地 `pnpm build` → scp `dist` 到 `frontend/dist.staging` 校验 → `mv dist dist.backup.<时间戳> && mv dist.staging dist`(原子切换零停机)→ curl 验证 hash。**仅后端改动**才需 docker rebuild。
+- ⚠️ **Windows SSH key 坑**:`J:\密钥\...` 在 Windows OpenSSH 下报「UNPROTECTED PRIVATE KEY」拒用,需拷到本地 NTFS 临时目录 + `icacls /inheritance:r /grant:r 用户:R` 收紧权限再用,用完删(全权才能删:`icacls /grant 用户:F`)。
 
 > ⚠️ 密钥**文件本身**不在 git 里(放在外部 `J:\密钥\`),路径只用于本地操作引用。
 
@@ -48,6 +50,8 @@ docker compose logs -f backend      # 看日志
 ```
 
 ## 当前状态
+
+**2026-05-30(部署完成)· 🚀 壁纸整屏统一 + 默认二次元壁纸 + 取消按钮 上线生产** — 接手另一会话前端 WIP(壁纸整屏覆盖 + 手机白块 `overflow-x-hidden`)+ 接入 `CancelRunButton` 到 `RunDetailSheet`(此前全项目零引用)+ 把 anime 黄昏 SVG 设为**项目默认壁纸**(无自定义背景时回落 + 加进 `BACKGROUND_PRESETS`)。3 commit `768c558`/`18e4d8c`/`6e44536`(**本地未 push**)。**已部署生产**:scp dist → 备份 `dist.backup.20260530-092717` → 原子切换,线上 hash `index-DyzpHkqD.js` → **`index-CcvT1q_e.js`**(顺带把**从未部署上线的 PR #9 code-review 修复**一并带上),`/health` 200 + JS/CSS 200。**视觉验证转用户**(我无 admin 密码登录不了):硬刷新后看侧栏/顶栏/内容是否整屏壁纸 + 手机端右侧白块。用户已授权 ssh/scp 部署(详见「生产部署目标」段)。
 
 **2026-05-30 · 🔧 接手前端体验改进(壁纸整屏统一 + 手机端)+ 进度文档核实修复** — 用户反馈:外观壁纸只铺在内容区,侧栏/顶栏仍纯色割裂,要**整屏统一壁纸背景**;手机端同样,且**最右侧大片白块**(疑似溢出 / 未铺背景)。新前端分支 `feat/ui-fullbg-mobile-runcancel`(从 main@`9bfaaa9` 切出,= main),涵盖 4 件:壁纸统一 + 手机端 + 运行取消 + 删除脚本,**两会话并行**(本会话:壁纸 + 手机端;另一会话:取消 + 删除)。**关键发现**:工作树已有**未提交 WIP** `AppLayout.tsx`(+41/−31,另一会话)= **壁纸整屏统一雏形已实现**(侧栏/顶栏半透明毛玻璃 + 背景上提根容器 + main `overflow-x-hidden` 顺带修白块),即用户要我做的事已在 WIP,**待用户定两会话边界**。**进度核实修复**:PR #9/#10 已 merge 进 main(原档写「待 merge」);PR #6 删脚本 / PR #7 手机响应式仍 OPEN(#7 代码已随 #8 super-PR 进 main);补全「重大变更」表缺失的 PR #5/#7/#8/#9 链接;重写「未决项」对齐 GitHub 真实 PR 号。**JM 机器刚重启**有 pending run 等执行。详见 [分支/feat-ui-fullbg-mobile-runcancel.md](分支/feat-ui-fullbg-mobile-runcancel.md)。
 
