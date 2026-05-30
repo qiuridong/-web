@@ -287,6 +287,110 @@ async def dispatch_run_event(
 
 
 # ============================================================
+# 节点事件分发(node_offline 等)— 与 run 通知**完全隔离**
+# ============================================================
+async def dispatch_node_event(
+    db: Session,
+    node: Any,
+    event: str,
+    *,
+    cipher: FernetCipher | None = None,
+    pool: _apprise_mod.AppriseClientPool | None = None,
+) -> int:
+    """节点级事件 → 匹配 ``scope=global`` 且 ``event`` 精确相等的规则并发送。
+
+    **不走 ``match_rules``**(那是 run 语义、且白名单只认 run 事件),只查全局 +
+    该 node 事件的规则,用 node 上下文渲染。这样对已有 run 通知逻辑零影响。
+
+    返回实际成功送达的渠道数。整体 try 兜住,失败只日志不抛。
+    """
+    if cipher is None:
+        from app.core.crypto import get_cipher  # noqa: PLC0415
+
+        cipher = get_cipher()
+    if pool is None:
+        pool = _apprise_mod.get_pool()
+
+    try:
+        stmt = select(NotificationRule).where(
+            NotificationRule.enabled.is_(True),
+            NotificationRule.scope == "global",
+            NotificationRule.event == event,
+        )
+        rules = list(db.scalars(stmt).all())
+        if not rules:
+            return 0
+
+        channel_ids = [r.channel_id for r in rules]
+        channels: dict[int, NotificationChannel] = {
+            c.id: c
+            for c in db.scalars(
+                select(NotificationChannel).where(
+                    NotificationChannel.id.in_(channel_ids)
+                )
+            ).all()
+        }
+
+        ctx = _templates_mod.build_node_context(node=node, event=event)
+        success_count = 0
+        now = _utcnow()
+        for rule in rules:
+            channel = channels.get(rule.channel_id)
+            if channel is None or not channel.enabled:
+                continue
+            if _is_throttled(rule, now):
+                continue
+            try:
+                apprise_url = cipher.decrypt(channel.apprise_url_blob)
+            except Exception as exc:  # noqa: BLE001
+                logger.error(
+                    "解密 channel.apprise_url 失败 channel_id={} err={}",
+                    channel.id,
+                    exc,
+                )
+                continue
+            try:
+                title, body = _templates_mod.render_node_notification(
+                    rule.template, ctx
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.error("渲染 node 通知模板失败 rule_id={} err={}", rule.id, exc)
+                continue
+
+            ok, latency_ms, err = await pool.send(
+                channel_id=channel.id,
+                channel_type=channel.type,
+                apprise_url=apprise_url,
+                title=title,
+                body=body,
+                body_format="markdown",
+            )
+            if ok:
+                success_count += 1
+                rule.last_fired_at = now
+            else:
+                logger.warning(
+                    "node 通知发送失败 rule_id={} channel_id={} err={}",
+                    rule.id,
+                    channel.id,
+                    err,
+                )
+
+        if success_count > 0:
+            db.flush()
+        return success_count
+
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "dispatch_node_event 异常 node={} event={} err={}",
+            getattr(node, "slug", None),
+            event,
+            exc,
+        )
+        return 0
+
+
+# ============================================================
 # 内部:从 run 找 script_id / 加载 ORM
 # ============================================================
 def _extract_script_id(db: Session, run: Any) -> int | None:

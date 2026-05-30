@@ -68,7 +68,7 @@ export interface ChannelTestResult {
 }
 
 export type NotificationScope = 'global' | 'script' | 'instance';
-export type NotificationEvent = 'success' | 'failure' | 'error' | 'timeout' | 'any';
+export type NotificationEvent = 'success' | 'failure' | 'error' | 'timeout' | 'any' | 'node_offline';
 
 export interface NotificationRule {
   id: number;

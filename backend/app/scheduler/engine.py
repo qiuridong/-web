@@ -73,6 +73,7 @@ _BUILTIN_JOBS = {
     "tasks:scan_scripts": "scripts/ 周期扫描",
     "tasks:resume_paused": "paused_until 到期恢复",
     "tasks:housekeeping": "session 过期 / 杂项清理",
+    "tasks:node_health": "节点掉线检测 + 通知",
 }
 
 
@@ -497,6 +498,7 @@ class SchedulerService:
     def _register_builtin_tasks(self) -> None:
         """注册周期内置任务。"""
         from app.tasks.housekeeping import housekeeping_job  # noqa: PLC0415
+        from app.tasks.node_health import node_health_job  # noqa: PLC0415
         from app.tasks.resume_paused import resume_paused_job  # noqa: PLC0415
         from app.tasks.scan_scripts import scan_scripts_job  # noqa: PLC0415
 
@@ -528,6 +530,16 @@ class SchedulerService:
             id="tasks:housekeeping",
             replace_existing=True,
             misfire_grace_time=120,
+            coalesce=True,
+        )
+
+        # node_health — 每分钟扫节点掉线 + 告警(async job,await dispatch)
+        self.scheduler.add_job(
+            node_health_job,
+            trigger=IntervalTrigger(minutes=1),
+            id="tasks:node_health",
+            replace_existing=True,
+            misfire_grace_time=60,
             coalesce=True,
         )
 
