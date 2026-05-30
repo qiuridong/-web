@@ -24,6 +24,7 @@ import {
   AlertTriangle,
   Info,
   Terminal,
+  ScrollText,
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -58,10 +59,12 @@ import { PageHeader } from '@/components/common/PageHeader';
 import { EmptyState } from '@/components/common/EmptyState';
 import {
   useNodes,
+  useNode,
   useCreateNode,
   useUpdateNode,
   useDeleteNode,
   useRegenerateNodeToken,
+  useUninstallNodeScript,
   type NodeListItem,
 } from '@/api/hooks/nodes';
 import { formatRelative } from '@/lib/format';
@@ -314,6 +317,104 @@ function AddNodeDialog({
 }
 
 // ============================================================
+// 节点已部署脚本管理 Dialog
+// ============================================================
+function NodeScriptsDialog({
+  open,
+  onOpenChange,
+  node,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  node: NodeListItem;
+}) {
+  const { data: detail, isLoading } = useNode(open ? node.id : undefined);
+  const { mutate: uninstall, isPending } = useUninstallNodeScript();
+  const deployed = detail?.deployed_scripts ?? {};
+  const pendingDelete = detail?.pending_actions?.delete ?? [];
+  const slugs = Object.keys(deployed).sort();
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <ScrollText size={18} className="text-primary" />
+            「{node.name || node.slug}」上的已部署脚本
+          </DialogTitle>
+          <DialogDescription>
+            agent 实际报告的本地脚本。删除会下发指令,agent 下次 poll(最长 30s)时删本地{' '}
+            <code>scripts/&lt;slug&gt;/</code> 并回报。
+          </DialogDescription>
+        </DialogHeader>
+
+        {isLoading ? (
+          <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+            <Loader2 size={14} className="animate-spin" />
+            加载中…
+          </div>
+        ) : slugs.length === 0 ? (
+          <div className="rounded-md border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+            该节点暂无 agent 上报的已部署脚本。
+            {pendingDelete.length > 0 && (
+              <div className="mt-1 text-warning">
+                (有待删除指令在途:{pendingDelete.join(', ')})
+              </div>
+            )}
+          </div>
+        ) : (
+          <ul className="max-h-[50vh] space-y-2 overflow-y-auto">
+            {slugs.map((slug) => {
+              const info = deployed[slug] || {};
+              const isPendingDel = pendingDelete.includes(slug);
+              return (
+                <li
+                  key={slug}
+                  className="flex items-center justify-between gap-2 rounded-md border border-border p-2.5"
+                >
+                  <div className="min-w-0">
+                    <code className="text-sm font-medium">{slug}</code>
+                    <div className="truncate text-[11px] text-muted-foreground">
+                      {info.sha256 ? `sha256 ${String(info.sha256).slice(0, 12)}… · ` : ''}
+                      {info.deployed_at ? `部署于 ${formatRelative(info.deployed_at)}` : ''}
+                    </div>
+                  </div>
+                  {isPendingDel ? (
+                    <Badge
+                      variant="outline"
+                      className="shrink-0 border-warning/30 bg-warning/10 text-warning"
+                    >
+                      待 agent 删除
+                    </Badge>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={isPending}
+                      className="shrink-0 border-danger/30 text-danger hover:bg-danger/10 hover:text-danger"
+                      onClick={() => uninstall({ nodeId: node.id, slug })}
+                    >
+                      <Trash2 size={13} className="mr-1.5" />
+                      删除
+                    </Button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            关闭
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ============================================================
 // 节点卡片
 // ============================================================
 function NodeCard({ node }: { node: NodeListItem }) {
@@ -324,6 +425,7 @@ function NodeCard({ node }: { node: NodeListItem }) {
   const [confirmRegen, setConfirmRegen] = useState(false);
   const [tokenShow, setTokenShow] = useState<string | null>(null);
   const [showInstallInfo, setShowInstallInfo] = useState(false);
+  const [showScripts, setShowScripts] = useState(false);
 
   async function handleToggleEnabled() {
     try {
@@ -438,6 +540,19 @@ function NodeCard({ node }: { node: NodeListItem }) {
                   <Button
                     variant="ghost"
                     size="icon"
+                    onClick={() => setShowScripts(true)}
+                    className="hover:bg-muted"
+                  >
+                    <ScrollText size={14} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>管理已部署脚本(查看 / 删除)</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
                     onClick={handleToggleEnabled}
                     className={node.enabled ? 'hover:bg-warning/10' : 'hover:bg-success/10'}
                   >
@@ -541,6 +656,9 @@ function NodeCard({ node }: { node: NodeListItem }) {
         nodeSlug={node.slug}
         mode="replay"
       />
+
+      {/* 管理已部署脚本(查看 / 删除) */}
+      <NodeScriptsDialog open={showScripts} onOpenChange={setShowScripts} node={node} />
     </>
   );
 }

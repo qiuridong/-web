@@ -60,9 +60,10 @@ class NodeListResponse(BaseModel):
 
 
 class NodeDetail(NodeListItem):
-    """节点详情(目前与列表项字段一致;预留扩展)。"""
+    """节点详情 — 额外暴露 agent 上报的已部署脚本 + 待执行的 sync/delete 指令。"""
 
-    pass
+    deployed_scripts: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    pending_actions: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class NodeCreate(BaseModel):

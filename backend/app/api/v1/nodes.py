@@ -56,7 +56,11 @@ def _node_to_item(node: Node) -> NodeListItem:
 
 def _node_to_detail(node: Node) -> NodeDetail:
     item = _node_to_item(node)
-    return NodeDetail.model_validate(item.model_dump())
+    return NodeDetail(
+        **item.model_dump(),
+        deployed_scripts=node_service.node_deployed_scripts(node),
+        pending_actions=node_service.node_pending_actions(node),
+    )
 
 
 # ============================================================
@@ -197,6 +201,32 @@ def delete_node(
     - 有 instance 关联时拒绝(用户必须先迁移 instance.node_id 到其它节点)
     """
     node_service.delete_node(db, node_id)
+    db.commit()
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response
+
+
+# ============================================================
+# 卸载节点上已部署的脚本(下发 pending_actions.delete)
+# ============================================================
+@router.post(
+    "/{node_id}/deployed-scripts/{slug}/uninstall",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="卸载节点上已部署的脚本(下发删除指令,agent 拉取后 rm)",
+)
+def uninstall_node_script(
+    node_id: int,
+    slug: str,
+    response: Response,
+    db: DBSession,
+    _user: CurrentUser,
+) -> Response:
+    """🔒 把 slug 加入节点 ``pending_actions.delete``。
+
+    agent 下次 poll 拉到后删本地 ``scripts/<slug>/``,再 inventory-report ack →
+    主面板从 ``deployed_scripts`` 移除。本地节点不适用(脚本在主面板,走 ``/scripts`` 删)。
+    """
+    node_service.request_uninstall_script(db, node_id, slug)
     db.commit()
     response.status_code = status.HTTP_204_NO_CONTENT
     return response
