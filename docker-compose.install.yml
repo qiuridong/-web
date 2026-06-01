@@ -1,0 +1,72 @@
+# =========================================
+# 一键自部署 compose — Caddy(自动 HTTPS)+ backend,全自包含
+# =========================================
+# 给「别人在自己 VPS 新部署」用。配合 install-panel.sh。
+#
+# 与现有生产的区别:
+#   - docker-compose.yml(生产 jb.aijiaxia.cc):仅 backend,前端走 host nginx + certbot
+#   - 本文件:多带一个 caddy 容器,自动签 Let's Encrypt 证书 + serve 前端 dist + 反代 /api,
+#     不需要在目标机装/配 nginx + certbot,真正一条命令起全套。
+#
+# 域名或 <ip>.sslip.io 都能被 Caddy 自动签证书(见 Caddyfile,吃 ${DOMAIN} ${ACME_EMAIL})。
+# 纯 HTTP(无证书)场景把 .env 里 DOMAIN 设成 http://<ip>、并设 COOKIE_SECURE=false。
+# =========================================
+
+services:
+  # ===== 后端:FastAPI + APScheduler =====
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: signin-panel-backend:latest
+    container_name: signin-panel-backend
+    restart: unless-stopped
+    init: true
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      # 纯 HTTP/IP 部署须设 false,否则浏览器不回传 Secure cookie → 登录失效
+      - COOKIE_SECURE=${COOKIE_SECURE:-true}
+      - DATABASE_URL=${DATABASE_URL:-sqlite:////app/data/db.sqlite3}
+      - SCHEDULER_DB_URL=${SCHEDULER_DB_URL:-sqlite:////app/data/scheduler.db}
+      - ENCRYPTION_KEY_PATH=${ENCRYPTION_KEY_PATH:-/app/data/encryption.key}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - WORKERS=1                              # 必须 1,APScheduler 同进程
+      - SCRIPTS_DIR=${SCRIPTS_DIR:-/app/scripts}
+    volumes:
+      - ./data:/app/data                       # SQLite + Fernet key(首启自动生成)
+      - ./scripts:/app/scripts                 # 签到脚本(install 时清空,用户自行上传)
+      - ./logs:/app/logs
+    expose:
+      - "8000"                                 # 只暴露给 docker 网内的 caddy,不绑 host 端口
+    mem_limit: 1g
+    pids_limit: 1024
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; urllib.request.urlopen('http://localhost:8000/health',timeout=3) or sys.exit(0)\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+  # ===== Caddy:自动 HTTPS + serve 前端 dist + 反代 /api =====
+  caddy:
+    image: caddy:2-alpine
+    container_name: signin-panel-caddy
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN}
+      - ACME_EMAIL=${ACME_EMAIL:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./frontend/dist:/srv:ro                # install-panel.sh 预先 docker build 出来
+      - caddy_data:/data                       # 证书等持久化(别删,删了会重新签、可能触发 LE 限流)
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:
