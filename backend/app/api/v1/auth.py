@@ -60,7 +60,7 @@ def _set_session_cookie(response: Response, token: str) -> None:
         max_age=settings.session_ttl_hours_default * 3600,
         path="/",
         httponly=True,
-        secure=settings.is_production,
+        secure=settings.effective_cookie_secure,
         samesite="lax",
     )
 
@@ -72,7 +72,7 @@ def _clear_session_cookie(response: Response) -> None:
         key=settings.session_cookie_name,
         path="/",
         httponly=True,
-        secure=settings.is_production,
+        secure=settings.effective_cookie_secure,
         samesite="lax",
     )
 

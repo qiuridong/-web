@@ -101,6 +101,12 @@ class Settings(BaseSettings):
     # ===== Session(可被 DB settings.session_ttl_hours 覆盖)=====
     session_cookie_name: str = "sid"
     session_ttl_hours_default: int = 24
+    #: session cookie 的 Secure 标志。None=依 environment 推断(production 开 / 其他关)。
+    #: 纯 HTTP/IP 部署(无 HTTPS)必须 COOKIE_SECURE=false,否则浏览器不回传 cookie → 登录失效。
+    cookie_secure: bool | None = Field(
+        default=None,
+        description="session cookie Secure 标志;None 依 environment;HTTP 部署设 false",
+    )
 
     # ===== CORS(开发用,生产同源时禁用)=====
     dev_cors_origins: list[str] = Field(
@@ -115,6 +121,13 @@ class Settings(BaseSettings):
     @property
     def is_development(self) -> bool:
         return self.environment == "development"
+
+    @property
+    def effective_cookie_secure(self) -> bool:
+        """cookie Secure:显式 cookie_secure 听它的,否则按 is_production。"""
+        if self.cookie_secure is not None:
+            return bool(self.cookie_secure)
+        return self.is_production
 
 
 @lru_cache(maxsize=1)

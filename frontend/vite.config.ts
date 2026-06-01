@@ -53,7 +53,9 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: true,
+    // 关闭 source map:prod dist 不需要(砍 ~11MB,部署 scp/tar 快很多;
+    // 要本地调试时临时改 true 重 build)
+    sourcemap: false,
     target: 'es2022',
     cssCodeSplit: true,
     reportCompressedSize: false,
