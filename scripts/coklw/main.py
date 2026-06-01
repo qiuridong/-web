@@ -42,6 +42,12 @@ SIGN_ACTION = "07e2fafdb61c964ff31938b1ac72ace4"
 CHECK_SIGNED_TYPE = "checkSigned"
 GO_SIGN_TYPE = "goSign"
 
+# 登录接口(账密兜底)— 从 HAR 真实抓包提取:
+# POST admin-ajax.php?_nonce=<n>&action=<LOGIN_ACTION>&type=login,multipart 表单 email+pwd+type
+# 响应 {code:0, data:{user:{...}}} + Set-Cookie wordpress_logged_in_* / wordpress_sec_*
+LOGIN_ACTION = "dd3e2aa1548380622059abb314f9077c"
+LOGIN_TYPE = "login"
+
 # 签到响应里 msg 中包含以下任一字样视为成功
 SUCCESS_MSG_KEYWORDS = ("签到", "勇士", "已签", "成功")
 
@@ -81,6 +87,10 @@ class NotLoggedInError(CoklwError):
 
 class NonceMissingError(CoklwError):
     """状态接口响应中没有 _nonce 字段,可能站点改版或被风控。"""
+
+
+class LoginFailedError(CoklwError):
+    """账密登录失败(账号/密码错误、被风控、站点改版等)。"""
 
 
 # ---------------------------------------------------------------------------
@@ -139,8 +149,14 @@ def _success_msg_match(msg: str) -> bool:
 # HTTP 调用
 # ---------------------------------------------------------------------------
 
-def fetch_status(client: httpx.Client, logger: logging.Logger) -> dict:
-    """调状态接口,返回完整 JSON。同时验证已登录态 + 拿 _nonce。"""
+def fetch_status(
+    client: httpx.Client, logger: logging.Logger, *, require_login: bool = True
+) -> dict:
+    """调状态接口,返回完整 JSON。
+
+    - ``require_login=True``(签到路径):未登录抛 ``NotLoggedInError``。
+    - ``require_login=False``(登录前取 nonce):不校验登录态,直接返回(含 ``_nonce``)。
+    """
     url = f"{BASE_URL}{AJAX_PATH}{_build_status_query()}"
     logger.debug(f"GET status {url}")
     r = client.get(url)
@@ -153,9 +169,9 @@ def fetch_status(client: httpx.Client, logger: logging.Logger) -> dict:
     except ValueError as e:
         raise CoklwError(f"状态接口返回非 JSON: {e}; body 头部: {r.text[:200]!r}")
 
-    if not _is_logged_in(data):
+    if require_login and not _is_logged_in(data):
         raise NotLoggedInError(
-            "状态接口未返回用户信息,cookie 可能已过期 — 请重新登录 coklw.net 复制 cookie"
+            "状态接口未返回用户信息,cookie 可能已过期 — 将尝试账密登录兜底"
         )
     if not data.get("_nonce"):
         raise NonceMissingError("状态接口响应中没有 _nonce 字段(站点可能改版)")
@@ -181,6 +197,68 @@ def do_sign(client: httpx.Client, nonce: str, logger: logging.Logger) -> dict:
     return data
 
 
+def _load_cookie_into_jar(client: httpx.Client, cookie_str: str) -> None:
+    """把 'name=val; name2=val2' cookie 字符串塞进 client 的 cookie jar。
+
+    用 jar(而非静态 Cookie header)是为了:登录接口 Set-Cookie 能被自动捕获,
+    后续请求自动带上新 cookie。
+    """
+    for part in cookie_str.split(";"):
+        part = part.strip()
+        if not part or "=" not in part:
+            continue
+        name, _, value = part.partition("=")
+        name = name.strip()
+        if name:
+            client.cookies.set(name, value.strip(), domain="coklw.net", path="/")
+
+
+def do_login(
+    client: httpx.Client, account: str, password: str, logger: logging.Logger
+) -> None:
+    """账密登录兜底:cookie 失效/缺失时用 email + 密码重新登录换 wordpress_logged_in_* cookie。
+
+    流程(HAR 抓包还原):
+    1. GET 状态接口取登录 ``_nonce``(未登录态也返回)
+    2. POST ``admin-ajax.php?_nonce=<n>&action=<LOGIN_ACTION>&type=login``,
+       multipart 表单 ``email`` + ``pwd`` + ``type=login``
+    3. ``code==0`` 即成功;Set-Cookie 自动进 ``client.cookies``,调用方继续 fetch_status
+
+    不打印密码;仅日志登录后的用户名。
+    """
+    pre = fetch_status(client, logger, require_login=False)
+    nonce = pre.get("_nonce")
+    if not nonce:
+        raise NonceMissingError("登录前取 _nonce 失败(状态接口无 _nonce)")
+    url = (
+        f"{BASE_URL}{AJAX_PATH}"
+        f"?_nonce={nonce}&action={LOGIN_ACTION}&type={LOGIN_TYPE}"
+    )
+    logger.info("Cookie 无效/缺失,尝试账密登录…")
+    # multipart/form-data:files 用 (None, value) 表示普通文本字段(与抓包格式一致)
+    r = client.post(
+        url,
+        files={
+            "email": (None, account),
+            "pwd": (None, password),
+            "type": (None, LOGIN_TYPE),
+        },
+    )
+    if r.status_code != 200:
+        raise LoginFailedError(f"登录接口 HTTP {r.status_code}: {r.text[:200]}")
+    try:
+        data = r.json()
+    except ValueError as e:
+        raise LoginFailedError(f"登录接口返回非 JSON: {e}; body: {r.text[:200]!r}")
+    if data.get("code") != 0:
+        msg = data.get("msg") or (data.get("data") or {}).get("msg") or str(data)[:160]
+        raise LoginFailedError(
+            f"账密登录失败: code={data.get('code')}, msg={msg!r}(请检查账号/密码)"
+        )
+    user = (data.get("data") or {}).get("user") or {}
+    logger.info(f"账密登录成功: {user.get('name') or account}")
+
+
 # ---------------------------------------------------------------------------
 # 入口
 # ---------------------------------------------------------------------------
@@ -188,6 +266,9 @@ def do_sign(client: httpx.Client, nonce: str, logger: logging.Logger) -> dict:
 def run(config: dict, context: Any) -> RunResult:
     logger: logging.Logger = context.logger
     cookie = (config.get("cookie") or "").strip()
+    account = (config.get("account") or "").strip()
+    password = (config.get("password") or "").strip()
+    has_creds = bool(account and password)
     delay = int(config.get("random_delay_sec", 0) or 0)
     ua = (
         config.get("user_agent")
@@ -196,12 +277,11 @@ def run(config: dict, context: Any) -> RunResult:
     )
     skip_if_signed = bool(config.get("skip_if_signed", True))
 
-    # 1) cookie 基本校验
-    try:
-        _validate_cookie(cookie)
-    except CookieMissingError as e:
-        logger.error(f"Cookie 校验失败: {e}")
-        return RunResult(success=False, message=str(e))
+    # 1) 至少要有 cookie 或 账号+密码 之一
+    if not cookie and not has_creds:
+        msg = "未配置 Cookie,也未配置「账号+密码」;请至少填一项(填账密可在 cookie 失效时自动登录)"
+        logger.error(msg)
+        return RunResult(success=False, message=msg)
 
     # 2) 随机延迟(避开固定时刻被识别为机器人)
     # ⚠️ Sanity check:防止 delay > timeout_sec - 60 → 必被主程序 SIGTERM 杀掉
@@ -236,7 +316,6 @@ def run(config: dict, context: Any) -> RunResult:
         "Accept": "application/json, text/plain, */*",
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         "X-Requested-With": "XMLHttpRequest",
-        "Cookie": cookie,
     }
 
     # HTTP 超时:留 10s 余量给主程序的整体 timeout_sec
@@ -249,8 +328,23 @@ def run(config: dict, context: Any) -> RunResult:
             timeout=http_timeout,
             http2=False,  # 避免 cloudflare 偶发 H2 SETTINGS 异常
         ) as client:
-            # 3) 拉状态 + 拿 nonce
-            status = fetch_status(client, logger)
+            # 把用户提供的 cookie(若有)载入 jar(而非静态 header,便于登录后自动更新)
+            if cookie:
+                _load_cookie_into_jar(client, cookie)
+
+            # 3) 拉状态;cookie 失效/缺失且配了账密 → 账密登录后重试
+            try:
+                status = fetch_status(client, logger, require_login=True)
+            except NotLoggedInError:
+                if not has_creds:
+                    raise CoklwError(
+                        "Cookie 已失效或缺失,且未配置账号+密码,无法自动登录;"
+                        "请更新 Cookie,或填写账号+密码启用自动登录兜底"
+                    )
+                do_login(client, account, password, logger)
+                # 登录后重新取状态(此时应已登录 + 拿到新 nonce)
+                status = fetch_status(client, logger, require_login=True)
+
             nonce = status["_nonce"]
             user_name = (status.get("user") or {}).get("name") or "<unknown>"
             point = (status.get("user") or {}).get("point")

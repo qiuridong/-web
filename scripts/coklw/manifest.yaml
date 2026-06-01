@@ -1,18 +1,15 @@
 slug: coklw
 name: COKLW 每日签到
 description: |
-  https://coklw.net/ 每日签到。
+  https://coklw.net/ 每日签到。典型奖励为积分 + 第 N 个签到勇士称号。
 
-  使用 cookie 复用已登录态,避开 Cloudflare turnstile challenge。
-  典型签到奖励为积分 + 第 N 个签到勇士称号。
-
-  ## 准备工作
-  1. 浏览器手动登录 `https://coklw.net/`
-  2. 完成登录后,F12 打开开发者工具 → Application(应用)→ Cookies → `https://coklw.net`
-  3. 复制 `wordpress_logged_in_*` 那一条(必需);最好把 `wordpress_sec_*` 也一起复制
-  4. 粘贴成 `name1=value1; name2=value2` 字符串到下面 Cookie 字段
-  5. 注意:WordPress cookie 有效期通常 14 天(若登录时勾"记住我"则 14 天),过期后需重新提供
-version: 1.0.0
+  ## 两种凭证(二选一,推荐账密)
+  - **账号 + 密码(推荐)**:填登录邮箱 + 密码。cookie 失效或缺失时脚本会
+    自动用账密重新登录换取新 cookie,免去手动维护。
+  - **Cookie**:浏览器登录后 F12 → Application → Cookies → coklw.net,复制
+    `wordpress_logged_in_*`(+ `wordpress_sec_*`)粘成 `name1=val1; name2=val2`。
+    有效期约 14 天,过期需手动更新(若同时填了账密则自动登录兜底,无需更新)。
+version: 1.1.0
 author: yunkelai
 homepage: https://coklw.net/
 
@@ -21,14 +18,31 @@ default_timeout_sec: 3900    # 65 分钟 = 60 分钟最大随机延迟 + 5 分�
 icon: icon.svg
 
 fields:
-  - key: cookie
-    label: Cookie
-    type: secret
-    required: true
+  - key: account
+    label: 账号(邮箱)
+    type: string
+    required: false
     description: |
-      浏览器登录 coklw.net 后,从 DevTools → Application → Cookies 复制全部
-      cookie(或至少包含 `wordpress_logged_in_*` 一条)粘贴成
-      `name1=val1; name2=val2` 字符串。
+      coklw.net 登录邮箱。**填了账号+密码后 Cookie 可留空** —— 脚本会在 cookie
+      失效或缺失时用账密自动登录换取新 cookie(推荐,免手动维护 cookie)。
+    placeholder: "you@example.com"
+
+  - key: password
+    label: 密码
+    type: secret
+    required: false
+    description: |
+      coklw.net 登录密码(加密存储)。与「账号」配合启用自动登录兜底。
+      仅在此控制面板填写,切勿贴到聊天 / 截图。
+
+  - key: cookie
+    label: Cookie(可选)
+    type: secret
+    required: false
+    description: |
+      可选。浏览器登录 coklw.net 后从 DevTools → Application → Cookies 复制
+      (至少含 `wordpress_logged_in_*`)粘成 `name1=val1; name2=val2`。
+      **若已填账号+密码,这里可留空**;cookie 失效时脚本自动用账密重新登录。
     placeholder: "wordpress_logged_in_xxx=yyy; wordpress_sec_xxx=zzz"
 
   - key: random_delay_sec
