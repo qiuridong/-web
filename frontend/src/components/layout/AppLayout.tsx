@@ -38,6 +38,7 @@ import {
   Search,
   ChevronsUpDown,
   Server,
+  Store,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { toast } from 'sonner';
@@ -189,6 +190,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { label: '仪表盘', to: '/dashboard', icon: LayoutDashboard },
   { label: '脚本', to: '/scripts', icon: ScrollText },
+  { label: '脚本市场', to: '/scripts/marketplace', icon: Store },
   { label: '执行', to: '/runs', icon: Activity },
   { label: '节点', to: '/nodes', icon: Server },
   { label: '通知', to: '/notifications', icon: Bell },
@@ -270,11 +272,19 @@ function Sidebar({
       {/* Nav 列表 */}
       <nav className="flex-1 overflow-y-auto p-2">
         <ul className="flex flex-col gap-1">
-          {NAV_ITEMS.map((item) => {
+          {/* 最长匹配高亮:/scripts/marketplace 只点亮「脚本市场」而非也点亮「脚本」 */}
+          {(() => {
+            const activeNavTo = NAV_ITEMS.filter(
+              (it) =>
+                location.pathname === it.to ||
+                location.pathname.startsWith(it.to + '/'),
+            ).reduce<string | null>(
+              (best, it) => (best && best.length >= it.to.length ? best : it.to),
+              null,
+            );
+            return NAV_ITEMS.map((item) => {
             const Icon = item.icon;
-            const isActive =
-              location.pathname === item.to ||
-              location.pathname.startsWith(item.to + '/');
+            const isActive = item.to === activeNavTo;
             const linkEl = (
               <NavLink
                 to={item.to}
@@ -302,7 +312,8 @@ function Sidebar({
                 )}
               </li>
             );
-          })}
+            });
+          })()}
         </ul>
       </nav>
 

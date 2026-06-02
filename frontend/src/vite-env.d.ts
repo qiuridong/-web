@@ -9,6 +9,14 @@ interface ImportMetaEnv {
    * - 生产:留空,与前端同源由 Caddy 反代
    */
   readonly VITE_API_BASE: string;
+
+  /**
+   * 脚本货架(Script Hub)基地址,供「脚本市场」页拉列表 + 拼 bundle.zip 安装 URL。
+   *
+   * - 默认(未设):https://hub.aijiaxia.cc(生产货架)
+   * - 本地联调:VITE_HUB_URL=http://localhost:8100(货架后端直连;需货架 CORS 放行管家 origin)
+   */
+  readonly VITE_HUB_URL?: string;
 }
 
 interface ImportMeta {

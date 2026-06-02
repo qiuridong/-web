@@ -31,6 +31,7 @@ import {
   Download,
   Files,
   FolderUp,
+  Link2,
   Loader2,
   Package,
   Server,
@@ -52,12 +53,14 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 import {
   useScriptUpload,
   type UploadError,
   type UploadResponse,
 } from '@/api/hooks/useScriptUpload';
+import { useUploadScriptFromUrl } from '@/api/hooks/useUploadScriptFromUrl';
 import { useNodes } from '@/api/hooks/nodes';
 import { formatBytes } from '@/lib/format';
 import {
@@ -180,15 +183,26 @@ async function analyzeUpload(files: File[]): Promise<FileAnalysis> {
 interface UploadScriptDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * 货架对接:若提供(来自 /scripts?import=<url>),打开时自动切到「从 URL 导入」分支并预填该 URL。
+   */
+  importUrl?: string;
 }
 
 type Phase = 'idle' | 'uploading' | 'success' | 'error';
+type Source = 'file' | 'url';
 
 const SLUG_RE = /^[a-z][a-z0-9_-]{1,40}$/;
+const HTTP_URL_RE = /^https?:\/\/.+/i;
 
-export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogProps) {
+export function UploadScriptDialog({ open, onOpenChange, importUrl }: UploadScriptDialogProps) {
   const navigate = useNavigate();
   const { upload, progress, isUploading, abort, reset } = useScriptUpload();
+  const uploadFromUrl = useUploadScriptFromUrl();
+
+  // 上传来源:本地文件 / 从 URL 导入(货架对接)
+  const [source, setSource] = useState<Source>('file');
+  const [urlValue, setUrlValue] = useState('');
 
   const [files, setFiles] = useState<File[]>([]);
   const [slug, setSlug] = useState('');
@@ -234,6 +248,28 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
     }
     return null;
   }, [slugTrim]);
+
+  // 是否处于"提交中"(file 走 XHR,url 走 mutation)
+  const busy = isUploading || uploadFromUrl.isPending;
+
+  // 客户端 URL 校验(url 分支)
+  const urlTrim = urlValue.trim();
+  const urlError = useMemo(() => {
+    if (!urlTrim) return null;
+    if (!HTTP_URL_RE.test(urlTrim)) return 'URL 必须以 http:// 或 https:// 开头';
+    return null;
+  }, [urlTrim]);
+
+  // 货架对接:打开时若带 importUrl,自动切「从 URL 导入」分支 + 预填。
+  // 同时默认关掉 dry-run:货架成品脚本多需真实凭证才能跑,空 config dry-run 必失败
+  // (结构校验仍在;用户可手动勾回 dry-run)。
+  useEffect(() => {
+    if (open && importUrl) {
+      setSource('url');
+      setUrlValue(importUrl);
+      setDryRun(false);
+    }
+  }, [open, importUrl]);
 
   // 拖拽 / 选文件 callback
   const onDrop = useCallback((accepted: File[]) => {
@@ -322,6 +358,8 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
 
   // 重置整个 Dialog 状态(关闭时调用)
   const resetAll = useCallback(() => {
+    setSource('file');
+    setUrlValue('');
     setFiles([]);
     setSlug('');
     setForce(false);
@@ -335,11 +373,12 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
     setAnalyzeError(null);
     setSelectedNodeIds([]);
     reset();
-  }, [reset]);
+    uploadFromUrl.reset();
+  }, [reset, uploadFromUrl]);
 
   const handleClose = useCallback(
     (next: boolean) => {
-      // 上传中关闭 → 主动 abort
+      // 上传中关闭 → 主动 abort(仅 file 走 XHR 可 abort;url 分支下载很快,直接关)
       if (!next && isUploading) {
         abort();
       }
@@ -352,18 +391,9 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
     [abort, isUploading, onOpenChange, resetAll],
   );
 
-  const startUpload = useCallback(async () => {
-    if (files.length === 0 || slugError) return;
-    setPhase('uploading');
-    setErrorMsg(null);
-    setErrorDetail(null);
-    try {
-      const resp = await upload(files, {
-        slug: slugTrim || undefined,
-        force,
-        dry_run: dryRun,
-        sync_to_nodes: selectedNodeIds.length > 0 ? selectedNodeIds : undefined,
-      });
+  // 成功处理(file / url 共用):落结果 + 推送同步 toast
+  const handleUploadSuccess = useCallback(
+    (resp: UploadResponse) => {
       setResult(resp);
       setPhase('success');
       // MVP-2 推送同步:主面板已把 slug 加入选定节点的 pending_actions.sync
@@ -378,6 +408,46 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
           { duration: 8000 },
         );
       }
+    },
+    [enabledNodes],
+  );
+
+  const startUpload = useCallback(async () => {
+    setErrorMsg(null);
+    setErrorDetail(null);
+
+    // ===== 从 URL 导入(货架对接)=====
+    if (source === 'url') {
+      if (!urlTrim || urlError) return;
+      setPhase('uploading');
+      try {
+        const resp = await uploadFromUrl.mutateAsync({
+          zip_url: urlTrim,
+          force,
+          dry_run: dryRun,
+          sync_to_nodes: selectedNodeIds.length > 0 ? selectedNodeIds : undefined,
+        });
+        handleUploadSuccess(resp);
+      } catch (err) {
+        const e = err as UploadError | Error;
+        setErrorMsg(e.message || '导入失败');
+        setErrorDetail('detail' in e ? (e as UploadError).detail : null);
+        setPhase('error');
+      }
+      return;
+    }
+
+    // ===== 本地文件上传 =====
+    if (files.length === 0 || slugError) return;
+    setPhase('uploading');
+    try {
+      const resp = await upload(files, {
+        slug: slugTrim || undefined,
+        force,
+        dry_run: dryRun,
+        sync_to_nodes: selectedNodeIds.length > 0 ? selectedNodeIds : undefined,
+      });
+      handleUploadSuccess(resp);
     } catch (err) {
       // 用户点取消触发 AbortError → 回到 idle,不显示错误
       if (err instanceof DOMException && err.name === 'AbortError') {
@@ -390,15 +460,30 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
       setErrorDetail('detail' in e ? e.detail : null);
       setPhase('error');
     }
-  }, [dryRun, files, force, slugError, slugTrim, upload]);
+  }, [
+    source,
+    urlTrim,
+    urlError,
+    uploadFromUrl,
+    files,
+    slugError,
+    slugTrim,
+    force,
+    dryRun,
+    selectedNodeIds,
+    upload,
+    handleUploadSuccess,
+  ]);
 
   const canSubmit =
-    files.length > 0 &&
-    !slugError &&
-    !isUploading &&
-    !analyzing &&
-    missingRequired.length === 0 &&
-    !analyzeError;
+    source === 'url'
+      ? !!urlTrim && !urlError && !busy
+      : files.length > 0 &&
+        !slugError &&
+        !busy &&
+        !analyzing &&
+        missingRequired.length === 0 &&
+        !analyzeError;
 
   return (
     <>
@@ -410,7 +495,7 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
             添加脚本
           </DialogTitle>
           <DialogDescription className="text-xs">
-            把现成的脚本目录或 .zip 文件拖到下方,后端会自动校验 manifest.yaml + 入库。
+            拖入脚本目录 / .zip,或从「脚本货架」URL 一键导入。后端会自动校验 manifest.yaml + 入库。
           </DialogDescription>
         </DialogHeader>
 
@@ -437,6 +522,26 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
             />
           ) : (
             <>
+              {/* 来源切换:本地文件 / 从 URL 导入(货架对接) */}
+              <Tabs
+                value={source}
+                onValueChange={(v) => setSource(v as Source)}
+                className="mb-4"
+              >
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="file" className="gap-1.5 text-xs">
+                    <FolderUp className="size-3.5" strokeWidth={1.75} />
+                    本地文件
+                  </TabsTrigger>
+                  <TabsTrigger value="url" className="gap-1.5 text-xs">
+                    <Link2 className="size-3.5" strokeWidth={1.75} />
+                    从 URL 导入
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+
+              {source === 'file' ? (
+              <>
               {/* 工具栏:下载模板 + 开发指南 */}
               <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2">
                 <p className="mr-auto text-[11px] text-muted-foreground">
@@ -504,7 +609,7 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
                       e.stopPropagation();
                       onPickFolder();
                     }}
-                    disabled={isUploading}
+                    disabled={busy}
                   >
                     <FolderUp className="mr-1.5 size-3.5" strokeWidth={1.75} />
                     选择文件夹
@@ -517,7 +622,7 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
                       e.stopPropagation();
                       openFilePicker();
                     }}
-                    disabled={isUploading}
+                    disabled={busy}
                   >
                     <Package className="mr-1.5 size-3.5" strokeWidth={1.75} />
                     选 .zip
@@ -576,9 +681,38 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
                   </ul>
                 </div>
               ) : null}
+              </>
+              ) : (
+                /* 从 URL 导入(货架对接):服务端下载远端 zip 入库,无需本地文件 */
+                <div className="mb-4 space-y-1.5">
+                  <Label htmlFor="import-url" className="text-xs">
+                    脚本 zip 的 URL
+                  </Label>
+                  <Input
+                    id="import-url"
+                    value={urlValue}
+                    onChange={(e) => setUrlValue(e.target.value)}
+                    placeholder="https://hub.aijiaxia.cc/api/scripts/<slug>/bundle.zip"
+                    className={cn(
+                      'h-9 font-mono text-sm',
+                      urlError && 'border-danger focus-visible:ring-danger',
+                    )}
+                    disabled={busy}
+                  />
+                  {urlError ? (
+                    <p className="text-[11px] text-danger">{urlError}</p>
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground">
+                      后端会下载该 zip → 校验 manifest + dry-run → 入库(slug 取自 manifest)。
+                      通常来自「脚本市场」一键安装或货架「导入到管家」。
+                    </p>
+                  )}
+                </div>
+              )}
 
-              {/* 表单 */}
+              {/* 表单(dry-run / force / 节点同步;slug 仅本地文件) */}
               <div className="space-y-3">
+                {source === 'file' ? (
                 <div className="space-y-1.5">
                   <Label htmlFor="upload-slug" className="text-xs">
                     Slug(URL 标识,英文小写)
@@ -592,7 +726,7 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
                       'h-9 font-mono text-sm',
                       slugError && 'border-danger focus-visible:ring-danger',
                     )}
-                    disabled={isUploading}
+                    disabled={busy}
                   />
                   {slugError ? (
                     <p className="text-[11px] text-danger">{slugError}</p>
@@ -602,13 +736,14 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
                     </p>
                   )}
                 </div>
+                ) : null}
 
                 <label className="flex items-center gap-2 text-sm">
                   <Checkbox
                     id="upload-dryrun"
                     checked={dryRun}
                     onCheckedChange={(v) => setDryRun(!!v)}
-                    disabled={isUploading}
+                    disabled={busy}
                   />
                   <span className="cursor-pointer">
                     上传前自动 dry-run(推荐)
@@ -623,7 +758,7 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
                     id="upload-force"
                     checked={force}
                     onCheckedChange={(v) => setForce(!!v)}
-                    disabled={isUploading}
+                    disabled={busy}
                   />
                   <span className="cursor-pointer">
                     slug 已存在则覆盖(force)
@@ -654,7 +789,7 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
                             id={`upload-node-${n.id}`}
                             checked={selectedNodeIds.includes(n.id)}
                             onCheckedChange={(v) => toggleNodeId(n.id, !!v)}
-                            disabled={isUploading}
+                            disabled={busy}
                           />
                           <label
                             htmlFor={`upload-node-${n.id}`}
@@ -694,17 +829,21 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
                 </div>
               </div>
 
-              {/* 上传中:进度条 */}
-              {isUploading ? (
+              {/* 提交中:file 显上传进度条;url 显下载 spinner */}
+              {busy ? (
                 <div className="mt-5 space-y-2">
                   <div className="flex items-center justify-between text-xs text-muted-foreground">
                     <span className="flex items-center gap-1.5">
                       <Loader2 className="size-3.5 animate-spin" strokeWidth={1.75} />
-                      正在上传...
+                      {source === 'url' ? '正在下载并入库...' : '正在上传...'}
                     </span>
-                    <span className="tabular-nums">{progress}%</span>
+                    {source === 'file' ? (
+                      <span className="tabular-nums">{progress}%</span>
+                    ) : null}
                   </div>
-                  <Progress value={progress} className="h-2" />
+                  {source === 'file' ? (
+                    <Progress value={progress} className="h-2" />
+                  ) : null}
                 </div>
               ) : null}
             </>
@@ -727,15 +866,15 @@ export function UploadScriptDialog({ open, onOpenChange }: UploadScriptDialogPro
               onClick={startUpload}
               disabled={!canSubmit}
             >
-              {isUploading ? (
+              {busy ? (
                 <>
                   <Loader2 className="mr-1.5 size-4 animate-spin" strokeWidth={1.75} />
-                  上传中
+                  {source === 'url' ? '导入中' : '上传中'}
                 </>
               ) : (
                 <>
                   <UploadIcon className="mr-1.5 size-4" strokeWidth={1.75} />
-                  开始上传
+                  {source === 'url' ? '导入入库' : '开始上传'}
                 </>
               )}
             </Button>

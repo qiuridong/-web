@@ -15,8 +15,8 @@
  *
  * 删除走 AlertDialog 二次确认,确认后调 DELETE /api/v1/scripts/{slug}?confirm=true。
  */
-import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router';
 import { useDebounce } from '@/hooks/useDebounce';
 import {
   Boxes,
@@ -30,6 +30,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Store,
   Table as TableIcon,
   Trash2,
   TriangleAlert,
@@ -127,6 +128,22 @@ export function ScriptList() {
 
   // === 上传 Dialog ===
   const [uploadOpen, setUploadOpen] = useState(false);
+
+  // === 货架对接:?import=<bundle url> 拦截 ===
+  // 货架「导入到管家」跳 /scripts?import=<url> → 自动打开上传 Dialog 的「从 URL 导入」分支并预填。
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [importUrl, setImportUrl] = useState<string | null>(null);
+  useEffect(() => {
+    const imp = searchParams.get('import');
+    if (imp) {
+      setImportUrl(imp);
+      setUploadOpen(true);
+      // 消费后清掉 query,避免刷新/返回再次触发,也不影响手动开关 Dialog
+      const next = new URLSearchParams(searchParams);
+      next.delete('import');
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   // === 派生 ===
   const isEmpty = !isLoading && (!scripts || scripts.length === 0);
@@ -302,6 +319,14 @@ export function ScriptList() {
                 <RefreshCw className="size-4" strokeWidth={1.75} />
               )}
               <span className="ml-1.5">重新扫描</span>
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate('/scripts/marketplace')}
+            >
+              <Store className="size-4" strokeWidth={1.75} />
+              <span className="ml-1.5 hidden sm:inline">脚本市场</span>
             </Button>
             <Button onClick={() => setUploadOpen(true)}>
               <Plus className="size-4" strokeWidth={2} />
@@ -493,8 +518,15 @@ export function ScriptList() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* 上传脚本 Dialog */}
-      <UploadScriptDialog open={uploadOpen} onOpenChange={setUploadOpen} />
+      {/* 上传脚本 Dialog(importUrl 非空时自动切「从 URL 导入」分支) */}
+      <UploadScriptDialog
+        open={uploadOpen}
+        onOpenChange={(o) => {
+          setUploadOpen(o);
+          if (!o) setImportUrl(null);
+        }}
+        importUrl={importUrl ?? undefined}
+      />
     </div>
   );
 }

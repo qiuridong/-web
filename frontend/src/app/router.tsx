@@ -27,6 +27,7 @@ import { LoginPage } from '@/pages/auth/Login';
 import { SetupPage } from '@/pages/auth/Setup';
 import { Dashboard } from '@/pages/dashboard/Dashboard';
 import { ScriptList } from '@/pages/scripts/ScriptList';
+import { ScriptMarketplace } from '@/pages/scripts/ScriptMarketplace';
 import { ScriptDetail } from '@/pages/scripts/ScriptDetail';
 import { InstanceList } from '@/pages/instances/InstanceList';
 import { NodeList } from '@/pages/nodes/NodeList';
@@ -58,6 +59,11 @@ export const router = createBrowserRouter([
       {
         path: 'scripts',
         element: <ScriptList />,
+      },
+      {
+        // 脚本市场(货架对接)— 必须在 scripts/:slug 之前,避免被动态段吞掉
+        path: 'scripts/marketplace',
+        element: <ScriptMarketplace />,
       },
       {
         path: 'scripts/:slug',
