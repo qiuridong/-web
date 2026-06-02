@@ -44,7 +44,7 @@
 - [x] **M1 验证闭环** — 后端在跑 + 前端 dev + Preview 走完整闭环 — 2026-06-02 ✅
 - [x] **M2 部署/迁移脚本** — install-hub.sh + migrate-hub.sh + 2 compose + Caddyfile + Dockerfile + 指南 — 2026-06-02（bash -n + export 验证 ✅，VPS 实测留 M4）
 - [ ] **M3 对接管家** — upload-from-url + ?import 拦截 + 脚本市场页 + CORS（独立分支改管家）
-- [ ] **M4 部署上线** — DNS + host nginx vhost + certbot + 生产 smoke
+- [x] **M4 部署上线** — 2026-06-02 上线 `https://hub.aijiaxia.cc`（LE 证书 + host nginx vhost + 响应式 dist，HTTPS smoke 全绿）
 - [ ] 进度 README 索引登记
 
 ---
@@ -84,6 +84,7 @@
 
 ## 最近迭代（倒序）
 
+- 2026-06-02（M4 上线 🎉）用户改 DNS→`.144` 后 `certbot --nginx` 签 LE 证书 + 301 跳转，HTTPS smoke 全绿（/api 200、首页 200、HTTP→HTTPS）。货架正式上线 `https://hub.aijiaxia.cc`，M1-M4 全部完成。管理员 admin/ITgfnbRZmF8y0pba。
 - 2026-06-02（响应式）前端全响应式检查+修复：`ui/dialog.tsx` 加 `max-h-[90dvh] overflow-y-auto`+移动端留边（防弹窗溢出/按钮截断）、详情字段表移动端卡片式（免横滚）、文件编辑器高度自适应；其余页面/组件审下来已响应式（grid 断点/flex-wrap/truncate/hidden sm:）。`tsc -b && vite build` 过，新 dist `index-BT44V6ZJ.js` 重部署生产。
 - 2026-06-02（M4 部署）货架部署到生产 `154.9.238.144`（管家同机，host nginx 路径）：容器 healthy(8100) + 3 种子 + nginx vhost `hub.aijiaxia.cc`（nginx -t 过、不碰 jb/vcs）+ 前端 dist serve + CORS 放行 jb，**本地 Host 头全绿**；管理员 `admin`/`ITgfnbRZmF8y0pba`。⚠️ **卡 DNS**：`hub.aijiaxia.cc` 误指 `154.9.238.177`，待用户改 `.144` → certbot 收尾。
 - 2026-06-02（续）push `feat/script-hub`（`db5bbf8` 货架本体 + `b7b98fa` 协作/部署素材）；组织**双会话并行** M3+M4（`进度/协作-脚本货架对接.md` 分工合同：A 货架侧+部署 / B 管家侧 upload-from-url+?import+市场页）；M4 部署素材就绪（`脚本货架/deploy/` nginx-hub.conf + 部署到生产VPS.md runbook），货架 CORS 代码就绪待部署，DNS `hub.aijiaxia.cc` 已加。

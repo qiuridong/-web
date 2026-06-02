@@ -51,6 +51,8 @@ docker compose logs -f backend      # 看日志
 
 ## 当前状态
 
+**2026-06-02(续7)· 🎉 货架上线 `https://hub.aijiaxia.cc`(M4 完成)** — 用户改 DNS A 记录到 `.144` 后,`certbot --nginx` 签 LE 证书(自动续期、到期 2026-08-31)+ `--redirect`。**HTTPS smoke 全绿**:`/api/scripts` 200 / 首页 200 / HTTP→HTTPS 301。货架正式上线(HTTPS + 响应式新版 + 后端 healthy + 3 种子 + CORS 放行 jb,**不碰 jb/vcs 两站**)。**M1-M4 全部完成 ✅**。剩 🅱 会话管家侧 M3(`upload-from-url`+`?import`+市场页)完成后整体整合(管家市场页直连 hub 一键装)。
+
 **2026-06-02(续6)· 📱 货架前端全响应式检查+修复 + 重部署** — 用户要求全页面响应式、支持所有手机。逐页/组件审:画廊(grid 1→2→3→4)/卡片(truncate+min-w-0)/详情头部按钮(flex-wrap)/AuthMenu(`hidden sm:`)/FileBrowser(`md:grid` 单列)/AuthDialog(`w-full sm:w-auto`)/ui-table(已 `overflow-auto`)均已响应式 ✅。**修 3 处**:① `ui/dialog.tsx` 加 `max-h-[90dvh] overflow-y-auto` + 移动端留边 `w-[calc(100%-1.5rem)]`(防矮屏/横屏弹窗溢出、按钮被截 —— 影响上传/标签/删除/登录全部弹窗)② 详情字段表移动端改卡片式(`md:hidden` 卡片 / `hidden md:block` 表格)免 4 列横滚 ③ 文件编辑器高度 `h-[60vh] sm:h-[28rem]` 适配矮屏。`tsc -b && vite build` 过,新 dist `index-BT44V6ZJ.js` 重部署生产 `frontend_dist`(Host 头 200)。仍卡 DNS(见续5)。
 
 **2026-06-02(续5)· 🚀 货架部署到生产 .144(管家同机)— 仅卡 DNS** — M4 路径 B:scp 货架到 `154.9.238.144:/opt/signin-hub` → docker compose 起 `signin-hub-backend`(127.0.0.1:8100,healthy)+ 3 种子导入 + `.env` CORS 放行 `jb.aijiaxia.cc` + seed admin(`admin`/`ITgfnbRZmF8y0pba`)+ host nginx vhost `hub.aijiaxia.cc`(`nginx -t` 过、**不碰 jb/vcs 两站**)+ 前端 dist serve。**本地 Host 头全绿**(首页 200 `<title>脚本货架</title>` / `/api` 200 / icon 200)。**唯一阻塞**:DNS `hub.aijiaxia.cc → 154.9.238.177`(应 `.144`,jb 即 .144)→ 公网 80 不可达 + certbot 签不了。**待用户改 Cloudflare A 记录到 `.144` → certbot + smoke 收尾**。清单见 [脚本货架/deploy/部署到生产VPS.md] / 密钥临时副本用完待删。
@@ -241,6 +243,7 @@ docker compose logs -f backend      # 看日志
 
 | 日期 | 标题 | 文件 |
 |---|---|---|
+| 2026-06-02 | 🗂 **附属子项目「脚本货架」M1-M4 上线 + 双会话对接** — 独立全栈(FastAPI+SQLite+React/shadcn)集中存管签到脚本、产出兼容管家的 zip,上线 `https://hub.aijiaxia.cc`(LE 证书 + 全响应式 + 后端 smoke 19/19 + bundle 喂管家校验全过 + 一键安装/迁移)。M3 管家对接 🅱 会话并行 | [分支/feat-script-hub.md](分支/feat-script-hub.md) · [协作](协作-脚本货架对接.md) |
 | 2026-05-30 | 🔧 **接手前端体验改进 + 进度核实修复**(本档) — 壁纸整屏统一 + 手机端右侧白块,新分支 `feat/ui-fullbg-mobile-runcancel`,两会话并行(壁纸/手机 vs 取消/删除);发现 `AppLayout.tsx` 已有未提交壁纸统一 WIP;修进度:#9/#10 已 merge、补全本表 PR #5/#7/#8/#9 链接、重写未决项对齐真实 PR 号 | [分支/feat-ui-fullbg-mobile-runcancel.md](分支/feat-ui-fullbg-mobile-runcancel.md) |
 | 2026-05-27 凌晨 | 🧹 **PR #6/#9 解 main 冲突全 MERGEABLE** — PR #8(super-PR 含 #7)merge 后,#6(删脚本)/#9(code-review 14 fix)与 main 冲突;#6 接 origin/main 时间线、#9 全 `--ours`(review fixes 完整保留),两 merge commit push,全 `MERGEABLE/CLEAN`,hash `index-C7rQPvNW.js`。后用户 merge #9/#10 进 main | [变更/2026-05-27-PR6-PR9冲突解决+全MERGEABLE.md](变更/2026-05-27-PR6-PR9冲突解决+全MERGEABLE.md) |
 | 2026-05-26 深夜末 | 🔍 **PR #7→#8 预解 AppLayout 冲突 + code-review 15 findings** — merge PR #7 到 appearance 分支(super-PR,hash `index-DyzpHkqD.js`),3 处真冲突融合;code-review `--effort high` 派 6 agent → 15 findings(HIGH 5 含 XSS / MED 7 / LOW 3),`fix/code-review-findings` 批量修(落地 PR #9 的 14 fix) | [变更/2026-05-26-PR8冲突预解+代码审核15findings.md](变更/2026-05-26-PR8冲突预解+代码审核15findings.md) |
