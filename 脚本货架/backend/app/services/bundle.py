@@ -29,8 +29,8 @@ from app.services.manifest import parse_manifest_text
 # ============================================================
 # 常量（与管家一致）
 # ============================================================
-MAX_ZIP_TOTAL_BYTES: int = 1 * 1024 * 1024
-MAX_FILE_BYTES: int = 256 * 1024
+MAX_ZIP_TOTAL_BYTES: int = 5 * 1024 * 1024
+MAX_FILE_BYTES: int = 2 * 1024 * 1024
 BACKUPS_SUBDIR: str = ".backups"
 
 RESERVED_SLUGS: frozenset[str] = frozenset({
@@ -91,10 +91,10 @@ def validate_zip_safety(zip_path: Path) -> list[ZipInfo]:
     except BadZipFile as exc:
         raise ValidationError(f"zip 文件解析失败: {exc}", details={"path": str(zip_path)}) from exc
 
-    if len(infos) > 200:
+    if len(infos) > 500:
         raise PayloadTooLarge(
-            f"zip 包含 {len(infos)} 个条目，超过 200 上限",
-            details={"count": len(infos), "limit": 200},
+            f"zip 包含 {len(infos)} 个条目，超过 500 上限",
+            details={"count": len(infos), "limit": 500},
         )
 
     total = 0

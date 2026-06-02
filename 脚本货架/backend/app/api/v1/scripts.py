@@ -23,7 +23,7 @@ from app.services import script_store
 
 router = APIRouter(prefix="/scripts", tags=["scripts"])
 
-_MAX_UPLOAD_BYTES = 4 * 1024 * 1024
+_MAX_UPLOAD_BYTES = 8 * 1024 * 1024  # 上传体（zip 文件）上限；解压后总 5MiB，留余量
 
 
 async def _read_zip_bytes(request: Request, file: UploadFile | None) -> bytes:
