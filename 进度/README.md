@@ -51,6 +51,8 @@ docker compose logs -f backend      # 看日志
 
 ## 当前状态
 
+**2026-06-02(续8)· 🌍 货架转公共仓库(支持第三方部署管家)** — 用户:货架只此一个、面向公众,别人部署自己管家来取脚本。**货架侧已完成+部署**:① CORS 改 `allow_origins=["*"]` 只放行 `GET/HEAD/OPTIONS`(写仍同源,别人改不了)→ 任意管家可跨域读;② 「导入到管家」**管家无关** —— `lib/manager.ts` localStorage 存访问者「我的管家地址」+ `ManagerSettings` 弹窗 + 顶栏齿轮 + `ImportToManagerButton`(设了跳自己管家/没设引导)。tsc+build 过(`index-D9DtifN8.js`)、curl 任意 Origin 返 `ACAO:*`。管家侧(市场页 `VITE_HUB_URL` 默认 hub + M3 合并 `main` 发布给别人 install)归 🅱+整合,详见 [协作-脚本货架对接.md](协作-脚本货架对接.md) §7。
+
 **2026-06-02(续7)· 🎉 货架上线 `https://hub.aijiaxia.cc`(M4 完成)** — 用户改 DNS A 记录到 `.144` 后,`certbot --nginx` 签 LE 证书(自动续期、到期 2026-08-31)+ `--redirect`。**HTTPS smoke 全绿**:`/api/scripts` 200 / 首页 200 / HTTP→HTTPS 301。货架正式上线(HTTPS + 响应式新版 + 后端 healthy + 3 种子 + CORS 放行 jb,**不碰 jb/vcs 两站**)。**M1-M4 全部完成 ✅**。剩 🅱 会话管家侧 M3(`upload-from-url`+`?import`+市场页)完成后整体整合(管家市场页直连 hub 一键装)。
 
 **2026-06-02(续6)· 📱 货架前端全响应式检查+修复 + 重部署** — 用户要求全页面响应式、支持所有手机。逐页/组件审:画廊(grid 1→2→3→4)/卡片(truncate+min-w-0)/详情头部按钮(flex-wrap)/AuthMenu(`hidden sm:`)/FileBrowser(`md:grid` 单列)/AuthDialog(`w-full sm:w-auto`)/ui-table(已 `overflow-auto`)均已响应式 ✅。**修 3 处**:① `ui/dialog.tsx` 加 `max-h-[90dvh] overflow-y-auto` + 移动端留边 `w-[calc(100%-1.5rem)]`(防矮屏/横屏弹窗溢出、按钮被截 —— 影响上传/标签/删除/登录全部弹窗)② 详情字段表移动端改卡片式(`md:hidden` 卡片 / `hidden md:block` 表格)免 4 列横滚 ③ 文件编辑器高度 `h-[60vh] sm:h-[28rem]` 适配矮屏。`tsc -b && vite build` 过,新 dist `index-BT44V6ZJ.js` 重部署生产 `frontend_dist`(Host 头 200)。仍卡 DNS(见续5)。

@@ -84,6 +84,7 @@
 
 ## 最近迭代（倒序）
 
+- 2026-06-02（第三方支持 🌍）货架转公共仓库：CORS `allow_origins=["*"]`（读公开 GET/HEAD/OPTIONS、写仍同源）+「导入到管家」管家无关（`manager.ts` localStorage 存访问者自己的管家地址 + `ManagerSettings` 弹窗 + 顶栏齿轮 + `ImportToManagerButton` 设了跳/没设引导）。tsc+build 过 `index-D9DtifN8.js`、已部署（任意 Origin 返 ACAO:*）。管家侧（市场页 `VITE_HUB_URL` 默认 hub + M3 合并 main 发布）归 B/整合。
 - 2026-06-02（M4 上线 🎉）用户改 DNS→`.144` 后 `certbot --nginx` 签 LE 证书 + 301 跳转，HTTPS smoke 全绿（/api 200、首页 200、HTTP→HTTPS）。货架正式上线 `https://hub.aijiaxia.cc`，M1-M4 全部完成。管理员 admin/ITgfnbRZmF8y0pba。
 - 2026-06-02（响应式）前端全响应式检查+修复：`ui/dialog.tsx` 加 `max-h-[90dvh] overflow-y-auto`+移动端留边（防弹窗溢出/按钮截断）、详情字段表移动端卡片式（免横滚）、文件编辑器高度自适应；其余页面/组件审下来已响应式（grid 断点/flex-wrap/truncate/hidden sm:）。`tsc -b && vite build` 过，新 dist `index-BT44V6ZJ.js` 重部署生产。
 - 2026-06-02（M4 部署）货架部署到生产 `154.9.238.144`（管家同机，host nginx 路径）：容器 healthy(8100) + 3 种子 + nginx vhost `hub.aijiaxia.cc`（nginx -t 过、不碰 jb/vcs）+ 前端 dist serve + CORS 放行 jb，**本地 Host 头全绿**；管理员 `admin`/`ITgfnbRZmF8y0pba`。⚠️ **卡 DNS**：`hub.aijiaxia.cc` 误指 `154.9.238.177`，待用户改 `.144` → certbot 收尾。

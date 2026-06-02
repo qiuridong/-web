@@ -1,10 +1,10 @@
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Download, ExternalLink, ImportIcon, Pencil, UserRound } from 'lucide-react';
+import { ArrowLeft, Download, ExternalLink, Pencil, UserRound } from 'lucide-react';
 
 import { api, ApiError } from '@/api/client';
 import { useScript, downloadBundle, qk } from '@/api/hooks';
-import { bundleAbsoluteUrl, managerImportUrl } from '@/api/urls';
+import { bundleAbsoluteUrl } from '@/api/urls';
 import type { FileContentResponse, FieldSummary } from '@/api/types';
 import { useAuth } from '@/auth/AuthProvider';
 import { formatBytes, formatRelative } from '@/lib/format';
@@ -12,13 +12,14 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { ScriptIcon } from '@/components/ScriptIcon';
 import { CopyButton } from '@/components/CopyButton';
 import { FileBrowser } from '@/components/FileBrowser';
 import { MarkdownView } from '@/components/MarkdownView';
 import { TagEditor } from '@/components/TagEditor';
 import { DeleteScriptButton } from '@/components/DeleteScriptButton';
+import { ImportToManagerButton } from '@/components/ImportToManagerButton';
 import { LoadingState, ErrorState } from '@/components/States';
 
 export function DetailPage() {
@@ -116,17 +117,7 @@ export function DetailPage() {
             下载 zip
           </Button>
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="secondary" asChild>
-                <a href={managerImportUrl(script.slug)} target="_blank" rel="noreferrer">
-                  <ImportIcon />
-                  导入到管家
-                </a>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>在签到管家中打开并导入此脚本</TooltipContent>
-          </Tooltip>
+          <ImportToManagerButton slug={script.slug} />
 
           <CopyButton
             variant="outline"

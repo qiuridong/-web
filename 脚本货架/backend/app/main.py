@@ -54,16 +54,17 @@ def create_app() -> FastAPI:
         redoc_url=None,
     )
 
-    # CORS：M3 允许签到管家前端跨域直读货架列表
-    origins = settings.cors_origin_list
-    if origins:
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=origins,
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
+    # CORS：货架是公共脚本仓库 —— 读接口（GET/HEAD/OPTIONS）对任意来源开放，
+    # 任何人在自己 VPS 部署的签到管家都能跨域读列表 / 拉 bundle / 取 icon；
+    # 写操作（POST/PUT/DELETE）不在放行方法内 → 只能由货架自己前端同源登录后操作，
+    # 别人无法跨域写。allow_credentials=False 与 "*" 兼容（读公开不需带 cookie）。
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["GET", "HEAD", "OPTIONS"],
+        allow_headers=["*"],
+    )
 
     @app.exception_handler(AppException)
     async def _handle_app_exception(_request: Request, exc: AppException) -> JSONResponse:
