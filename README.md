@@ -2,7 +2,7 @@
 
 > 把零散的签到脚本统一到一个 Web 控制台。服务器 7×24 自动调度,浏览器一站式管理,失败可推通知。
 >
-> **个人 / 小团队自用**,Ubuntu 24 + Docker Compose 单机部署。
+> **个人 / 小团队自用**,主流 Linux(Debian / Ubuntu / CentOS / RHEL 系)+ Docker Compose 单机部署,一条命令一键装好。
 
 ## 🆚 vs 青龙面板(为什么不是再造一个青龙)
 
@@ -36,7 +36,7 @@
 - 🌐 **多节点 agent**(MVP-1):Pull Agent + Long Polling(类 GitHub Actions self-hosted runner),签到任务可绑节点跑
 - 📝 **Web 上传脚本**(MVP-5):浏览器拖 zip 上传 + 在线 CodeMirror 编辑 + 自动 dry-run 校验
 - 🔍 **结构化失败诊断**:`RunResult.data` 含完整 endpoint / status / body_preview / elapsed_ms,前端 /runs 5 秒定位 bug
-- 🚀 **一键部署**:Docker Compose + nginx 反代 + Let's Encrypt + systemd 开机自启
+- 🚀 **一键自部署**:`install-panel.sh` 一条命令装好(自动 Docker + Caddy 自动 HTTPS + 后端 + 建管理员),**无域名也能出真 HTTPS**(`<ip>.sslip.io` 魔法 DNS)
 
 ## 📦 已内置精装脚本(N=3,覆盖 3 种典型反爬模式)
 
@@ -50,6 +50,7 @@
 
 ## 📚 文档体系
 
+- 🚀 [**一键部署指南.md**](一键部署指南.md) — **新机器一条命令自部署**(Docker + Caddy 自动 HTTPS + 无域名 sslip.io + 多发行版支持 + 运维命令)
 - 📋 [**docs/SCRIPT-FIELDS-REFERENCE.md**](docs/SCRIPT-FIELDS-REFERENCE.md) — **manifest 11 字段类型完整速查 + 真实例 yaml**(写新脚本必看)
 - 📖 [项目说明.md](项目说明.md) — 完整中文项目介绍 + 脚本开发规范
 - 🛠 [scripts/coklw/](scripts/coklw/), [scripts/ptfans/](scripts/ptfans/), [scripts/jmcomic/](scripts/jmcomic/) — 3 个真签到精装范例,直接参考改写
@@ -66,34 +67,52 @@
 | UI 库 | shadcn/ui + Tailwind CSS v4 + lucide-react |
 | 数据可视化 | Recharts + Tremor + Framer Motion |
 | 实时日志 | sse-starlette(后端)+ @microsoft/fetch-event-source + xterm.js(前端) |
-| 部署 | Caddy 2(反代 + 自动 HTTPS)+ Docker Compose + Ubuntu 24 |
+| 部署 | Caddy 2(反代 + 自动 HTTPS)+ Docker Compose + 主流 Linux(`install-panel.sh` 一键) |
 
 ## 🚀 快速开始
 
-### 生产部署(Ubuntu 24)
+### 方式一:一键自部署(推荐 —— 给一台干净的新 VPS)
+
+一条命令装好全套(自动装 Docker → 容器内构建前端 → 起 Caddy 自动 HTTPS + 后端 → 建管理员并打印账密):
 
 ```bash
-# 1. 准备
-sudo apt update && sudo apt install -y docker.io docker-compose-plugin git
-git clone <repo-url> /opt/signin-panel
-cd /opt/signin-panel
+git clone https://github.com/qiuridong/-web signin-panel && cd signin-panel
 
-# 2. 配置环境
-cp .env.example .env
-vim .env                              # 改 DOMAIN / ACME_EMAIL / UID / GID
+# ① 有域名(自动 Let's Encrypt HTTPS):
+sudo bash install-panel.sh --access your.domain.com --email you@example.com
 
-# 3. 准备目录(host 文件属主与容器内 UID/GID 对齐)
+# ② 只有公网 IP、没有域名 —— 自动用 <ip>.sslip.io 出真 HTTPS(免买域名):
+sudo bash install-panel.sh --access 1.2.3.4 --email you@example.com
+
+# ③ 纯 HTTP(仅内网/调试,不签证书,自动关 Secure cookie):
+sudo bash install-panel.sh --access 1.2.3.4 --http
+```
+
+装完打印 **访问地址 + 管理员账号 / 随机密码**(登录后请立即到「设置」改密)。装好是**空面板**(不含任何脚本),自己到「脚本」页上传。
+
+- **前置**:`root` 权限;放通端口 **80 + 443**(签 HTTPS 必需);**不需要**预装 docker / node(脚本自动装)。
+- **支持的发行版**(自动识别包管理器 apt / dnf / yum / zypper / pacman / apk):
+
+  | 发行版 | 状态 |
+  |---|---|
+  | **Debian / Ubuntu**(apt) | ✅ 开箱即用 |
+  | **CentOS / RHEL / Rocky / AlmaLinux / Fedora**(dnf/yum) | ✅ 开箱即用 |
+  | openSUSE / Arch / Alpine | ⚠️ 需先手动装好 docker + compose v2,再跑脚本 |
+
+> 📖 完整参数、运维命令、HTTPS / 无域名(sslip.io)原理、装后步骤 → **[一键部署指南.md](一键部署指南.md)**
+
+### 方式二:手动部署(已有 Docker、想自己掌控每一步)
+
+```bash
+git clone https://github.com/qiuridong/-web /opt/signin-panel && cd /opt/signin-panel
+cp .env.example .env && vim .env          # 改 DOMAIN / ACME_EMAIL
 mkdir -p data scripts logs frontend/dist
 sudo chown -R 1000:1000 data scripts logs
-
-# 4. 前端构建产物(本机或 CI 跑 pnpm build,把 dist/ 推到这里)
-#    或直接在服务器:cd frontend && pnpm install && pnpm build
-
-# 5. 起服务
-docker compose up -d
-
-# 6. 浏览器打开 https://<你的域名>,首次访问引导设置管理员密码
+cd frontend && pnpm install && pnpm build && cd ..   # 或本机/CI 构建后把 dist/ 推上来
+docker compose up -d                       # 浏览器打开 https://<你的域名> 引导建管理员
 ```
+
+> ⚠️ 根目录两个 compose 文件**用途不同**:`docker-compose.install.yml`(方式一,自带 Caddy 全自动)/ `docker-compose.yml`(方式二,**仅后端**,反代 + 证书需你自己用 host nginx/Caddy 配)。
 
 ### 本地开发
 
