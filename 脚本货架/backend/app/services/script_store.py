@@ -78,6 +78,9 @@ def _upsert_row(db: Session, slug: str, manifest, manifest_text: str, target: Pa
     row.version = manifest.version
     row.author = manifest.author
     row.homepage = manifest.homepage
+    _mcat = getattr(manifest, "category", None)
+    if _mcat:  # manifest 写了分类才覆盖；否则保留用户在货架手动设的分类
+        row.category = _mcat
     row.icon_svg = _extract_icon(target, manifest)
     row.manifest_yaml = manifest_text
     row.fields_summary = summarize_fields(manifest)

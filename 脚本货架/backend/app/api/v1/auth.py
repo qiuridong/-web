@@ -8,6 +8,7 @@ from app.config import get_settings
 from app.db.models.user import User
 from app.deps import get_db, require_user
 from app.schemas.auth import (
+    ChangePasswordRequest,
     LoginRequest,
     MessageResponse,
     SetupRequest,
@@ -100,3 +101,16 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)) 
 @router.get("/me", response_model=UserResponse)
 def me(user: User = Depends(require_user)) -> UserResponse:
     return _user_resp(user)
+
+
+@router.post("/change-password", response_model=MessageResponse)
+def change_password(
+    payload: ChangePasswordRequest,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> MessageResponse:
+    auth_service.change_password(
+        db, user=user, old_password=payload.old_password, new_password=payload.new_password
+    )
+    db.commit()
+    return MessageResponse(message="密码已修改")

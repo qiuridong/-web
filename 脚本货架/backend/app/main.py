@@ -29,6 +29,19 @@ async def lifespan(_app: FastAPI):
 
     Base.metadata.create_all(bind=engine)
 
+    # 2.5 轻量 schema 演进：旧库补 category 列（create_all 不改已存在表）+ 已知脚本默认归类
+    from sqlalchemy import text, update
+
+    from app.db.models.script import HubScript
+    from app.db.session import SessionLocal
+
+    with engine.connect() as conn:
+        _cols = [r[1] for r in conn.execute(text("PRAGMA table_info(hub_scripts)"))]
+        if "category" not in _cols:
+            conn.execute(text("ALTER TABLE hub_scripts ADD COLUMN category VARCHAR(32)"))
+            conn.commit()
+            logger.info("schema 演进：hub_scripts 补 category 列")
+
     # 3. 种子导入（幂等，首启把初始库存灌进库）
     try:
         from app.services.seed import seed_initial_scripts
@@ -38,6 +51,16 @@ async def lifespan(_app: FastAPI):
             logger.info("种子导入 {} 个脚本", count)
     except Exception as exc:  # noqa: BLE001
         logger.warning("种子导入跳过: {}", exc)
+
+    # 4. 已知脚本默认归类（种子入库后，仅对仍未分类的设；用户改过的不动）
+    with SessionLocal() as _db:
+        for _slug, _cat in {"ptfans": "PT站", "jmcomic": "漫画动漫", "coklw": "论坛社区"}.items():
+            _db.execute(
+                update(HubScript)
+                .where(HubScript.slug == _slug, HubScript.category.is_(None))
+                .values(category=_cat)
+            )
+        _db.commit()
 
     logger.info("脚本货架启动完成 env={} docs={}", settings.environment, settings.is_docs_exposed())
     yield

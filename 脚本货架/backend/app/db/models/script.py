@@ -29,7 +29,9 @@ class HubScript(Base):
     homepage: Mapped[str | None] = mapped_column(String(256), nullable=True)
     #: icon.svg 文件内容（内联文本，前端直接渲染）
     icon_svg: Mapped[str | None] = mapped_column(Text, nullable=True)
-    #: 标签数组（用户分类，如 ["PT", "漫画"]）
+    #: 预设分类（单选，如 PT站/漫画动漫/论坛社区…；可空=未分类）
+    category: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    #: 标签数组（自由标签，如 ["每日", "WordPress"]）
     tags: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     #: manifest.yaml 原文（详情页展示 / 重新解析）
     manifest_yaml: Mapped[str] = mapped_column(Text, nullable=False)

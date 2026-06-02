@@ -122,6 +122,8 @@ def update_script(
     db: Session = Depends(get_db),
 ) -> ScriptDetail:
     row = script_store.get_script(db, slug)
+    if payload.category is not None:
+        row.category = payload.category.strip() or None
     if payload.tags is not None:
         row.tags = payload.tags
     db.flush()

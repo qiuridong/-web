@@ -26,6 +26,14 @@ def test_detail(client):
     assert len(d["manifest_yaml"]) > 50
 
 
+def test_category_default(client):
+    """lifespan 给已知脚本默认归类。"""
+    s = {x["slug"]: x for x in client.get("/api/scripts").json()}
+    assert s["ptfans"]["category"] == "PT站"
+    assert s["jmcomic"]["category"] == "漫画动漫"
+    assert s["coklw"]["category"] == "论坛社区"
+
+
 def test_detail_404(client):
     assert client.get("/api/scripts/nonexistent").status_code == 404
 
@@ -90,6 +98,20 @@ def test_path_traversal_blocked(client):
 def test_update_tags(client):
     r = client.patch("/api/scripts/coklw", json={"tags": ["签到", "WordPress"]})
     assert r.status_code == 200 and r.json()["tags"] == ["签到", "WordPress"]
+
+
+def test_update_category(client):
+    r = client.patch("/api/scripts/coklw", json={"category": "技术开发"})
+    assert r.status_code == 200 and r.json()["category"] == "技术开发"
+
+
+def test_change_password(client):
+    bad = client.post("/api/auth/change-password", json={"old_password": "wrong", "new_password": "newpass123"})
+    assert bad.status_code == 401  # 旧密码错
+    ok = client.post("/api/auth/change-password", json={"old_password": "test12345", "new_password": "newpass123"})
+    assert ok.status_code == 200
+    client.post("/api/auth/logout")
+    assert client.post("/api/auth/login", json={"username": "admin", "password": "newpass123"}).status_code == 200
 
 
 def test_delete(client):

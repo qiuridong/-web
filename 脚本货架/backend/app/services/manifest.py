@@ -174,6 +174,8 @@ class Manifest(BaseModel):
     description: str | None = None
     author: Annotated[str, StringConstraints(max_length=64)] | None = None
     homepage: Annotated[str, StringConstraints(max_length=256)] | None = None
+    #: 货架预设分类（可选；管家 manifest 模型 extra=ignore，写了不影响管家）
+    category: Annotated[str, StringConstraints(max_length=32)] | None = None
 
     default_cron: str | None = None
     default_timeout_sec: int = Field(default=300, ge=1, le=86400)

@@ -22,6 +22,7 @@ class ScriptListItem(BaseModel):
     version: str
     author: str | None = None
     homepage: str | None = None
+    category: str | None = None
     tags: list[str] = []
     field_count: int = 0
     file_count: int = 0
@@ -68,6 +69,8 @@ class UploadResponse(BaseModel):
 
 
 class UpdateScriptRequest(BaseModel):
+    #: 传 None=不改；传 "" 或 "未分类"=清为未分类；传分类名=设置
+    category: str | None = None
     tags: list[str] | None = None
 
 
@@ -80,6 +83,7 @@ def list_item_from_row(row: HubScript) -> ScriptListItem:
         version=row.version,
         author=row.author,
         homepage=row.homepage,
+        category=row.category,
         tags=list(row.tags or []),
         field_count=len(row.fields_summary or []),
         file_count=row.file_count,

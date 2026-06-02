@@ -167,6 +167,19 @@ def revoke_session(db: Session, token: str | None) -> None:
     db.flush()
 
 
+def change_password(db: Session, *, user: User, old_password: str, new_password: str) -> None:
+    """校验旧密码 → 设新密码（保留当前 session，不强制重登）。"""
+    if not verify_password(old_password, user.password_hash):
+        raise InvalidCredentials("旧密码不正确")
+    if old_password == new_password:
+        raise ValidationError("新密码不能与旧密码相同")
+    user.password_hash = hash_password(new_password)
+    user.failed_login_count = 0
+    user.locked_until = None
+    db.flush()
+    logger.info("用户改密 user_id={}", user.id)
+
+
 def cleanup_expired_sessions(db: Session) -> int:
     """删除所有过期 session，返回删除数。"""
     now = _utcnow()
