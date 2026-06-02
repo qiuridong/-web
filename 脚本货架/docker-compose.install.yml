@@ -1,0 +1,53 @@
+# 脚本货架 · 自包含 compose（caddy + backend）
+# 用于「全新干净机器」一键部署：caddy 抢 80/443 自动 HTTPS + serve dist + 反代 /api。
+# 由 install-hub.sh 驱动；docker compose 自动读同目录 .env 插值。
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: signin-hub-backend:latest
+    container_name: signin-hub-backend
+    restart: unless-stopped
+    user: "1000:1000"
+    init: true
+    environment:
+      - ENVIRONMENT=production
+      - TZ=${TZ:-Asia/Shanghai}
+      - DATABASE_URL=sqlite:////app/data/hub.sqlite3
+      - COOKIE_SECURE=${COOKIE_SECURE:-true}
+      - CORS_ORIGINS=${CORS_ORIGINS:-}
+    volumes:
+      - ./backend/data:/app/data
+      - ./backend/logs:/app/logs
+    expose:
+      - "8000"
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: signin-hub-caddy
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN}
+      - ACME_EMAIL=${ACME_EMAIL:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./frontend_dist:/srv:ro       # install-hub.sh 构建出的前端 dist
+      - caddy_data:/data              # 证书持久化
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

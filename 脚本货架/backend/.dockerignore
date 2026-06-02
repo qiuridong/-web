@@ -1,0 +1,9 @@
+data/
+logs/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.venv/
+.env
+_smoke.py
+*.tar.gz

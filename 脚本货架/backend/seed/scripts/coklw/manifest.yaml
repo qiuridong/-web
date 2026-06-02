@@ -1,0 +1,85 @@
+slug: coklw
+name: COKLW 每日签到
+description: |
+  https://coklw.net/ 每日签到。典型奖励为积分 + 第 N 个签到勇士称号。
+
+  ## 两种凭证(二选一,推荐账密)
+  - **账号 + 密码(推荐)**:填登录邮箱 + 密码。cookie 失效或缺失时脚本会
+    自动用账密重新登录换取新 cookie,免去手动维护。
+  - **Cookie**:浏览器登录后 F12 → Application → Cookies → coklw.net,复制
+    `wordpress_logged_in_*`(+ `wordpress_sec_*`)粘成 `name1=val1; name2=val2`。
+    有效期约 14 天,过期需手动更新(若同时填了账密则自动登录兜底,无需更新)。
+version: 1.1.0
+author: yunkelai
+homepage: https://coklw.net/
+
+default_cron: "0 9 * * *"
+default_timeout_sec: 3900    # 65 分钟 = 60 分钟最大随机延迟 + 5 分钟实际签到余量;**timeout 必须 ≥ random_delay_sec + 60**
+icon: icon.svg
+
+fields:
+  - key: account
+    label: 账号(邮箱)
+    type: string
+    required: false
+    description: |
+      coklw.net 登录邮箱。**填了账号+密码后 Cookie 可留空** —— 脚本会在 cookie
+      失效或缺失时用账密自动登录换取新 cookie(推荐,免手动维护 cookie)。
+    placeholder: "you@example.com"
+
+  - key: password
+    label: 密码
+    type: secret
+    required: false
+    description: |
+      coklw.net 登录密码(加密存储)。与「账号」配合启用自动登录兜底。
+      仅在此控制面板填写,切勿贴到聊天 / 截图。
+
+  - key: cookie
+    label: Cookie(可选)
+    type: secret
+    required: false
+    description: |
+      可选。浏览器登录 coklw.net 后从 DevTools → Application → Cookies 复制
+      (至少含 `wordpress_logged_in_*`)粘成 `name1=val1; name2=val2`。
+      **若已填账号+密码,这里可留空**;cookie 失效时脚本自动用账密重新登录。
+    placeholder: "wordpress_logged_in_xxx=yyy; wordpress_sec_xxx=zzz"
+
+  - key: random_delay_sec
+    label: 随机延迟(秒)
+    type: integer
+    default: 3600
+    min: 0
+    max: 7200
+    description: |
+      脚本启动后随机 sleep 0~N 秒再签到,避免每天固定时刻被风控识别。
+      默认 3600 = 1 小时;配合 `default_cron: "0 9 * * *"` 即签到时刻
+      均匀落在北京时间 9:00–10:00 之间。设为 0 = 立即签到(适合调试)。
+      ⚠️ **实例 timeout 必须 ≥ 本字段 + 60 秒**,否则脚本被主程序超时强杀
+      (本脚本默认 timeout 3900 已留足 1 小时延迟空间;若你调小 timeout
+      请同步调小本字段,否则会被 SIGTERM)。
+
+  - key: user_agent
+    label: User-Agent
+    type: string
+    required: false
+    default: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36 Edg/148.0.0.0"
+    description: 自定义请求 UA。建议保持与抓包时浏览器一致以降低风控概率。
+
+  - key: skip_if_signed
+    label: 已签到时跳过
+    type: boolean
+    default: true
+    description: |
+      签到前先调状态接口检查 `customPointSignDaily.signed`,
+      若已签到则直接返回 success("今日已签到"),不再调签到接口。
+      关闭则强制重复请求一次签到接口(WordPress 端会拒绝并返回提示)。
+
+runtime:
+  python_version: ">=3.10"
+  isolated: true
+  env_passthrough:
+    - HTTP_PROXY
+    - HTTPS_PROXY
+    - NO_PROXY
+  dependencies_file: requirements.txt

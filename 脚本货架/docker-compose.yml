@@ -1,0 +1,31 @@
+# 脚本货架 · backend-only compose
+# 用于「同 VPS 复用 host nginx」部署：backend 绑 127.0.0.1:8100，host nginx 反代。
+# docker compose 自动读同目录 .env 做 ${...} 插值。
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: signin-hub-backend:latest
+    container_name: signin-hub-backend
+    restart: unless-stopped
+    user: "1000:1000"
+    init: true
+    ports:
+      - "127.0.0.1:8100:8000"        # 仅 loopback，host nginx 反代
+    environment:
+      - ENVIRONMENT=production
+      - TZ=${TZ:-Asia/Shanghai}
+      - DATABASE_URL=sqlite:////app/data/hub.sqlite3
+      - COOKIE_SECURE=${COOKIE_SECURE:-true}
+      - CORS_ORIGINS=${CORS_ORIGINS:-}
+    volumes:
+      - ./backend/data:/app/data       # SQLite + 脚本源
+      - ./backend/logs:/app/logs
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

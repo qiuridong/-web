@@ -1,0 +1,72 @@
+slug: ptfans
+name: PTFans 每日签到
+description: |
+  https://ptfans.cc/ 每日签到(NexusPHP 框架,PT 站,Cloudflare 后)。
+
+  使用 cookie 复用已登录态,避开 Cloudflare 防护与 captcha。
+  签到奖励:首签 10 魔力值;每连续 +5;第 10/20/30 连续天分别额外 +200/+500/+1000。
+
+  ## 准备工作
+  1. 浏览器手动登录 `https://ptfans.cc/`(勾"记住我"延长 cookie 有效期)
+  2. F12 → Application(应用)→ Cookies → `https://ptfans.cc`
+  3. 复制 `c_secure_pass` 的 value(NexusPHP 的核心登录态 cookie,base64 编码包含 user_id + expires + 签名)
+  4. 粘贴成 `c_secure_pass=eyJ1c2VyX...` 字符串到下面 Cookie 字段;若不止一项可粘 `name1=val1; name2=val2`
+  5. cookie 有效期看签发时 expires 字段(典型 1-2 年,远长于普通 session)
+version: 1.0.0
+author: yunkelai
+homepage: https://ptfans.cc/
+
+default_cron: "0 9 * * *"
+default_timeout_sec: 2000     # 30 分钟最大随机延迟 + 余量;**timeout 必须 ≥ random_delay_sec + 60**
+icon: icon.svg
+
+fields:
+  - key: cookie
+    label: Cookie
+    type: secret
+    required: true
+    description: |
+      浏览器登录 ptfans.cc 后,从 DevTools → Application → Cookies 复制
+      `c_secure_pass` 字段(必需,长 ~144 字符);若顺手把其它 cookie 也带上
+      也可以,粘成 `name1=val1; name2=val2` 字符串即可。
+    placeholder: "c_secure_pass=eyJ1c2VyX2lkIjoxMjM0NSwiZXhwaXJlcyI6MTgwNzIyOTQ0NX0..."
+
+  - key: random_delay_sec
+    label: 随机延迟(秒)
+    type: integer
+    default: 1800
+    min: 0
+    max: 7200
+    description: |
+      脚本启动后随机 sleep 0~N 秒再签到,避免每天固定时刻被 PT 站风控识别。
+      默认 1800 = 30 分钟;配合 `default_cron: "0 9 * * *"` 即签到时刻
+      均匀落在北京时间 9:00–9:30 之间。设为 0 = 立即签到(调试用)。
+      ⚠️ **实例 timeout 必须 ≥ 本字段 + 60 秒**,否则脚本会被主程序超时强杀。
+      本脚本默认 timeout 2000s 已留足 1800s + 200s 余量;若你调大延迟,
+      请同步调大实例 timeout。
+
+  - key: user_agent
+    label: User-Agent
+    type: string
+    required: false
+    default: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36 Edg/148.0.0.0"
+    description: 自定义请求 UA。建议保持与抓包时浏览器一致以降低风控概率。
+
+  - key: skip_if_signed
+    label: 已签到时跳过
+    type: boolean
+    default: true
+    description: |
+      签到前先调 `/index.php` 检查顶部 `[签到已得 X]` 字样,若已签到则
+      直接返回 success("今日已签到"),不再请求 `/attendance.php`。
+      关闭则**总是**请求一次 attendance.php(NexusPHP 二次访问只返回日历,
+      不会重复加分,但浪费一次请求)。
+
+runtime:
+  python_version: ">=3.10"
+  isolated: true
+  env_passthrough:
+    - HTTP_PROXY
+    - HTTPS_PROXY
+    - NO_PROXY
+  dependencies_file: requirements.txt

@@ -1,0 +1,26 @@
+# ===== 运行时数据（货架 SQLite + 脚本源 + 日志）=====
+backend/data/
+data/
+logs/
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# ===== 前端 =====
+frontend/node_modules/
+frontend/dist/
+frontend_dist/
+
+# ===== 迁移 / 备份产物 =====
+*.tar.gz
+hub-backup-*
+
+# ===== 杂项 =====
+.env
+.DS_Store
