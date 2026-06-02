@@ -51,6 +51,8 @@ docker compose logs -f backend      # 看日志
 
 ## 当前状态
 
+**2026-06-03(续10)· 🗂 货架增强:分类+搜索 + 个人页面(改密+主题) + 上传放宽** — 用户三需求 + 放宽,**已全部上线**:① **分类** 后端 `category` 全链路 + lifespan 轻量迁移(ALTER 列 + 默认归类:生产 coklw→论坛社区/jmcomic→漫画动漫/ptfans→PT站)+ 前端 `lib/categories.ts`(10 预设)+ 画廊分类筛选 chips + 卡片徽标 + 详情 `CategoryEditor`;② **搜索** 画廊增强(也匹配 category);③ **个人页面** `/settings`(改密 `change_password` + 外观 主题浅/深/跟随系统 + AuthMenu 齿轮入口);④ **上传放宽**(用户拍板)5MiB/2MiB/500(货架 bundle/api + 文案)。前端 opus agent 产出 + 我集成,tsc 严格全过,**pytest 17 项全过**,部署主站 `index-zpB8zS1Z.js` + backend rebuild。**待**:管家同步放宽(整合,见协作 md §7);顶栏现两齿轮(管家地址 + 设置页)待定是否合并。
+
 **2026-06-02(续9)· 📤 上传 UI 对齐管家格式+提示 + 🔑 备份兜底站 SSH 受阻** — 用户两需求。**①(完成)上传格式提示**:移植 `frontend/src/lib/script-template.ts`(manifest/main.py 模板与管家**完全一致**,含 dry-run 短路)+ `UploadDialog` 增强(下载模板按钮 + 拖入 jszip+js-yaml 预校验 checklist:必含 manifest.yaml/main.py + slug/version 合法,缺必填禁上传 + 格式速览 + dry-run 警告)。装 jszip+js-yaml,tsc+build 过,部署主站 `index-CgTcy8cD.js`。**②(受阻)备份兜底站** `hub2.aijiaxia.cc`(38.49.208.71,密钥 `J:\密钥\加拿大`):38:22 可达,但密钥 `servarica_ed25519`(C:\ 主副本 + J:\ 备份都试)被拒 `Permission denied(publickey)` → 38 的 authorized_keys 没这公钥/已轮换。**待用户**:在 38 配公钥 `ssh-ed25519 AAAA...claude-servarica-2026-05-17` 或给正确凭证 → 再部署 hub2 + 每日 cron 同步 154 数据 + DNS `hub2→38`。
 
 **2026-06-02(续8)· 🌍 货架转公共仓库(支持第三方部署管家)** — 用户:货架只此一个、面向公众,别人部署自己管家来取脚本。**货架侧已完成+部署**:① CORS 改 `allow_origins=["*"]` 只放行 `GET/HEAD/OPTIONS`(写仍同源,别人改不了)→ 任意管家可跨域读;② 「导入到管家」**管家无关** —— `lib/manager.ts` localStorage 存访问者「我的管家地址」+ `ManagerSettings` 弹窗 + 顶栏齿轮 + `ImportToManagerButton`(设了跳自己管家/没设引导)。tsc+build 过(`index-D9DtifN8.js`)、curl 任意 Origin 返 `ACAO:*`。管家侧(市场页 `VITE_HUB_URL` 默认 hub + M3 合并 `main` 发布给别人 install)归 🅱+整合,详见 [协作-脚本货架对接.md](协作-脚本货架对接.md) §7。
