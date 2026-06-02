@@ -5,7 +5,8 @@
  * 登录 / 初始化用同一个 Dialog,按 setupRequired 切换模式。
  */
 import * as React from 'react';
-import { LogOut, UserRound } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { LogOut, Settings, UserRound } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useAuth } from '@/auth/AuthProvider';
@@ -33,6 +34,11 @@ export function AuthMenu() {
           <UserRound className="h-4 w-4" />
           {user.display_name || user.username}
         </span>
+        <Button variant="ghost" size="icon" asChild title="设置" aria-label="设置">
+          <Link to="/settings">
+            <Settings className="h-4 w-4" />
+          </Link>
+        </Button>
         <Button
           variant="outline"
           size="sm"

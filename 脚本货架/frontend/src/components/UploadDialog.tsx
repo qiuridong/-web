@@ -177,7 +177,7 @@ function UploadDialogBody({ open, onOpenChange }: { open: boolean; onOpenChange:
         <DialogHeader>
           <DialogTitle>上传脚本</DialogTitle>
           <DialogDescription>
-            上传符合格式的 .zip（与签到管家一致）。需含 manifest.yaml + main.py，单文件 ≤256KiB、总 ≤1MiB。
+            上传符合格式的 .zip（与签到管家一致）。需含 manifest.yaml + main.py，单文件 ≤2MiB、总 ≤5MiB。
           </DialogDescription>
         </DialogHeader>
 

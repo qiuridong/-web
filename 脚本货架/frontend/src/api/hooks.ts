@@ -8,6 +8,7 @@ import { bundlePath } from './urls';
 import type {
   FileContentResponse,
   FileListResponse,
+  MessageResponse,
   ScriptDetail,
   ScriptListItem,
   UploadResponse,
@@ -79,6 +80,19 @@ export function useUpdateTags(slug: string) {
   });
 }
 
+/** 更新分类:传分类名设置,传 "" 清为未分类(后端 PATCH {category})。 */
+export function useUpdateCategory(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (category: string) =>
+      api.patch<ScriptDetail>(`/api/scripts/${encodeURIComponent(slug)}`, { category }),
+    onSuccess: (detail) => {
+      qc.setQueryData(qk.script(slug), detail);
+      void qc.invalidateQueries({ queryKey: qk.scripts });
+    },
+  });
+}
+
 export function useWriteFile(slug: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -92,6 +106,17 @@ export function useWriteFile(slug: string) {
       void qc.invalidateQueries({ queryKey: qk.fileContent(slug, path) });
       void qc.invalidateQueries({ queryKey: qk.files(slug) });
     },
+  });
+}
+
+/** 修改密码:旧密码错后端返 401(ApiError.isUnauthorized),新密码 < 6 位返 422。 */
+export function useChangePassword() {
+  return useMutation({
+    mutationFn: ({ oldPassword, newPassword }: { oldPassword: string; newPassword: string }) =>
+      api.post<MessageResponse>('/api/auth/change-password', {
+        old_password: oldPassword,
+        new_password: newPassword,
+      }),
   });
 }
 

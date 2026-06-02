@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { Download, FileText, SlidersHorizontal } from 'lucide-react';
 
 import type { ScriptListItem } from '@/api/types';
+import { categoryIcon } from '@/lib/categories';
 import { ScriptIcon } from '@/components/ScriptIcon';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
@@ -24,6 +25,13 @@ export function ScriptCard({ script }: { script: ScriptListItem }) {
             <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">{script.slug}</p>
           </div>
         </div>
+
+        {/* 分类(有则显示,主色描边 + 图标,区别于下方 tags) */}
+        {script.category && (
+          <div className="mt-2.5">
+            <CategoryBadge category={script.category} />
+          </div>
+        )}
 
         {/* 描述 */}
         <p className="mt-3 line-clamp-2 min-h-[2.5rem] text-sm text-muted-foreground">
@@ -63,5 +71,19 @@ export function ScriptCard({ script }: { script: ScriptListItem }) {
         </div>
       </Card>
     </Link>
+  );
+}
+
+/** 分类徽标:主色描边 + 分类图标,视觉上区别于普通 outline 标签。 */
+export function CategoryBadge({ category }: { category: string }) {
+  const Icon = categoryIcon(category);
+  return (
+    <Badge
+      variant="outline"
+      className="gap-1 border-primary/40 bg-primary/5 font-medium text-primary"
+    >
+      <Icon className="h-3 w-3" />
+      {category}
+    </Badge>
   );
 }

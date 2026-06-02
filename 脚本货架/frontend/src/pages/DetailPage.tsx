@@ -14,6 +14,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { ScriptIcon } from '@/components/ScriptIcon';
+import { CategoryBadge } from '@/components/ScriptCard';
+import { CategoryEditor } from '@/components/CategoryEditor';
 import { CopyButton } from '@/components/CopyButton';
 import { FileBrowser } from '@/components/FileBrowser';
 import { MarkdownView } from '@/components/MarkdownView';
@@ -84,8 +86,29 @@ export function DetailPage() {
               <span className="tabular-nums">{script.download_count} 次下载</span>
             </div>
 
-            {/* 标签 */}
+            {/* 分类 */}
             <div className="flex flex-wrap items-center gap-1.5 pt-1">
+              {script.category ? (
+                <CategoryBadge category={script.category} />
+              ) : (
+                <span className="text-xs text-muted-foreground">未分类</span>
+              )}
+              {user && (
+                <CategoryEditor
+                  slug={script.slug}
+                  category={script.category}
+                  trigger={
+                    <Button variant="ghost" size="sm" className="h-6 gap-1 px-2 text-xs text-muted-foreground">
+                      <Pencil className="h-3 w-3" />
+                      {script.category ? '改分类' : '设分类'}
+                    </Button>
+                  }
+                />
+              )}
+            </div>
+
+            {/* 标签 */}
+            <div className="flex flex-wrap items-center gap-1.5">
               {script.tags.map((t) => (
                 <Badge key={t} variant="outline" className="font-normal">
                   {t}

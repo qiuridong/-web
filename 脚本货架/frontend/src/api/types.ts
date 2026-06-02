@@ -9,6 +9,7 @@ export interface ScriptListItem {
   version: string;
   author: string | null;
   homepage: string | null;
+  category: string | null;
   tags: string[];
   field_count: number;
   file_count: number;
@@ -72,6 +73,11 @@ export interface SetupStateResponse {
 export interface HealthResponse {
   status: string;
   app: string;
+}
+
+/** 后端通用 {message} 响应(如修改密码)。 */
+export interface MessageResponse {
+  message: string;
 }
 
 // ===== 统一错误体 =====

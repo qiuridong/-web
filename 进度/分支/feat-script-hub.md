@@ -84,6 +84,7 @@
 
 ## 最近迭代（倒序）
 
+- 2026-06-03（前端增强 ✅）对接后端新 `category` 字段 + 改密 endpoint，纯前端：新增 `lib/categories.ts`（10 预设分类 + lucide 图标）；GalleryPage 加分类筛选 chips（全部+分类+未分类，单选，搜索也匹配 category，移动端换行）；ScriptCard 加分类徽标（主色描边+图标，`export CategoryBadge` 复用）；DetailPage 头部显示分类 + 登录后 `CategoryEditor` 弹窗改分类（PATCH `{category}`，`""` 清未分类）；新增 `SettingsPage`（路由 `/settings`）含「修改密码」卡（旧/新/确认，前端校验两次一致+≥6 位，401→「旧密码不正确」）+「外观」卡（浅色/深色/跟随系统三选一，next-themes）；ThemeProvider `enableSystem={false}→true`（让「跟随系统」生效，默认仍 dark）；AuthMenu 登录后加齿轮→`/settings`；hooks 加 `useChangePassword`+`useUpdateCategory`，types 加 `category`+`MessageResponse`。`pnpm build`（tsc -b 严格全过）通过，dist：app `index-*.js` 67.4KB + vendor 757.8KB（lucide 新增图标致 +~150KB，按图标 tree-shake）+ css 31.6KB。**未起后端**（按要求，类型按契约手写）。改动 9 文件 + 新增 3 文件（categories.ts / CategoryEditor.tsx / SettingsPage.tsx）。
 - 2026-06-02（后端测试 ✅）货架后端 pytest 回归 **14 项全过**（`backend/tests/` conftest+test_hub，临时库隔离），覆盖列表/详情/bundle 兼容/CORS 公开/鉴权门/上传/在线编辑/路径穿越/标签/删除。主项目 venv 跑。
 - 2026-06-02（上传提示 ✅ + 备份受阻 🔑）上传 UI 对齐管家：移植 script-template.ts（模板与管家一致）+ UploadDialog 拖入预校验 checklist+下载模板+格式说明（jszip/js-yaml），部署主站 index-CgTcy8cD.js。备份兜底站 38.49.208.71/hub2 SSH 密钥被拒(publickey)，待用户在 38 配公钥（claude-servarica-2026-05-17）或给凭证 + 加 DNS hub2→38。
 - 2026-06-02（第三方支持 🌍）货架转公共仓库：CORS `allow_origins=["*"]`（读公开 GET/HEAD/OPTIONS、写仍同源）+「导入到管家」管家无关（`manager.ts` localStorage 存访问者自己的管家地址 + `ManagerSettings` 弹窗 + 顶栏齿轮 + `ImportToManagerButton` 设了跳/没设引导）。tsc+build 过 `index-D9DtifN8.js`、已部署（任意 Origin 返 ACAO:*）。管家侧（市场页 `VITE_HUB_URL` 默认 hub + M3 合并 main 发布）归 B/整合。
