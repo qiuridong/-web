@@ -51,19 +51,43 @@ echo "============================================================"
 echo "签到管家 一键自部署 · $(date '+%F %T')"
 echo "============================================================"
 
+# 跨发行版装包:apt(Debian/Ubuntu)/ dnf·yum(CentOS/RHEL/Rocky/Alma/Fedora)/
+# zypper(openSUSE)/ pacman(Arch)/ apk(Alpine)。识别不出则提示手动装。
+_pkg_install() {
+  if   command -v apt-get >/dev/null 2>&1; then apt-get update -y && apt-get install -y "$@"
+  elif command -v dnf     >/dev/null 2>&1; then dnf install -y "$@"
+  elif command -v yum     >/dev/null 2>&1; then yum install -y "$@"
+  elif command -v zypper  >/dev/null 2>&1; then zypper --non-interactive install "$@"
+  elif command -v pacman  >/dev/null 2>&1; then pacman -Sy --noconfirm "$@"
+  elif command -v apk     >/dev/null 2>&1; then apk add --no-cache "$@"
+  else echo "⚠️ 未识别的包管理器,请手动安装: $*"; return 1; fi
+}
+
+# curl 是装 Docker 的前提(部分精简镜像默认无)
+command -v curl >/dev/null 2>&1 || _pkg_install curl ca-certificates || {
+  echo "❌ 缺 curl 且无法自动安装,请先手动 install curl 后重跑"; exit 1; }
+
 # ---- 1. Docker ----
 if ! command -v docker >/dev/null 2>&1; then
-  echo "[1/8] 安装 Docker..."
-  curl -fsSL https://get.docker.com | sh
+  echo "[1/8] 安装 Docker(官方脚本,支持 Debian/Ubuntu/CentOS/RHEL/Rocky/Alma/Fedora)..."
+  curl -fsSL https://get.docker.com | sh || {
+    echo "❌ Docker 自动安装失败 —— 你的发行版可能不被 get.docker.com 支持(如 Arch/Alpine/openSUSE)。"
+    echo "   请按官方文档手动安装 docker 引擎 + compose v2 插件后,再重跑本脚本。"
+    exit 1; }
 else
   echo "[1/8] Docker 已装:$(docker --version)"
 fi
-docker compose version >/dev/null 2>&1 || { echo "❌ 需要 docker compose v2(随新版 docker 一起装)"; exit 1; }
+# 确保 docker 守护进程已启动 + 开机自启(systemd 系统;get.docker.com 通常已处理,这里兜底)
+systemctl enable --now docker >/dev/null 2>&1 || service docker start >/dev/null 2>&1 || true
+docker compose version >/dev/null 2>&1 || {
+  echo "❌ 需要 docker compose v2 插件(随新版 docker 一起装)。"
+  echo "   若你的是旧版独立 docker-compose(v1),请升级到带 'docker compose' 子命令的新版。"
+  exit 1; }
 
 # ---- 2. 取代码 ----
 if [[ ! -f docker-compose.install.yml ]]; then
   echo "[2/8] 拉取代码 $REPO_URL ..."
-  command -v git >/dev/null 2>&1 || { apt-get update -y && apt-get install -y git; }
+  command -v git >/dev/null 2>&1 || _pkg_install git || { echo "❌ 无法自动安装 git,请手动 install git 后重跑"; exit 1; }
   git clone --depth 1 "$REPO_URL" signin-panel
   cd signin-panel
 else
