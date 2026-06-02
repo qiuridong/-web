@@ -160,10 +160,10 @@ function FileViewer({
           value={value}
           onChange={(e) => setDraft(e.target.value)}
           spellCheck={false}
-          className="h-[28rem] resize-y font-mono text-xs leading-relaxed"
+          className="h-[60vh] resize-y font-mono text-xs leading-relaxed sm:h-[28rem]"
         />
       ) : (
-        <pre className="max-h-[28rem] overflow-auto rounded-lg border bg-muted/40 p-4 font-mono text-xs leading-relaxed">
+        <pre className="max-h-[60vh] overflow-auto rounded-lg border bg-muted/40 p-4 font-mono text-xs leading-relaxed sm:max-h-[28rem]">
           <code>{content}</code>
         </pre>
       )}

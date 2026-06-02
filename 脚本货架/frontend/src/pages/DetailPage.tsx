@@ -184,38 +184,67 @@ function FieldsTable({ fields }: { fields: FieldSummary[] }) {
     return <p className="text-sm text-muted-foreground">该脚本无需配置字段。</p>;
   }
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>键 (key)</TableHead>
-          <TableHead>标签</TableHead>
-          <TableHead>类型</TableHead>
-          <TableHead className="text-center">必填</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
+    <>
+      {/* 移动端:卡片式(避免 4 列表格在窄屏横滚) */}
+      <ul className="space-y-2 md:hidden">
         {fields.map((f) => (
-          <TableRow key={f.key}>
-            <TableCell className="font-mono text-xs">{f.key}</TableCell>
-            <TableCell>{f.label}</TableCell>
-            <TableCell>
-              <Badge variant="secondary" className="font-mono text-[10px]">
-                {f.type}
-              </Badge>
-            </TableCell>
-            <TableCell className="text-center">
+          <li key={f.key} className="rounded-lg border p-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="min-w-0 truncate font-mono text-xs">{f.key}</span>
               {f.required ? (
-                <Badge variant="default" className="text-[10px]">
+                <Badge variant="default" className="shrink-0 text-[10px]">
                   必填
                 </Badge>
               ) : (
-                <span className="text-xs text-muted-foreground">可选</span>
+                <span className="shrink-0 text-xs text-muted-foreground">可选</span>
               )}
-            </TableCell>
-          </TableRow>
+            </div>
+            <div className="mt-1.5 flex items-center justify-between gap-2">
+              <span className="min-w-0 truncate text-sm">{f.label}</span>
+              <Badge variant="secondary" className="shrink-0 font-mono text-[10px]">
+                {f.type}
+              </Badge>
+            </div>
+          </li>
         ))}
-      </TableBody>
-    </Table>
+      </ul>
+
+      {/* 桌面:表格 */}
+      <div className="hidden md:block">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>键 (key)</TableHead>
+              <TableHead>标签</TableHead>
+              <TableHead>类型</TableHead>
+              <TableHead className="text-center">必填</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {fields.map((f) => (
+              <TableRow key={f.key}>
+                <TableCell className="font-mono text-xs">{f.key}</TableCell>
+                <TableCell>{f.label}</TableCell>
+                <TableCell>
+                  <Badge variant="secondary" className="font-mono text-[10px]">
+                    {f.type}
+                  </Badge>
+                </TableCell>
+                <TableCell className="text-center">
+                  {f.required ? (
+                    <Badge variant="default" className="text-[10px]">
+                      必填
+                    </Badge>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">可选</span>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </>
   );
 }
 

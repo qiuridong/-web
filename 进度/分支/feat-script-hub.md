@@ -84,6 +84,8 @@
 
 ## 最近迭代（倒序）
 
+- 2026-06-02（响应式）前端全响应式检查+修复：`ui/dialog.tsx` 加 `max-h-[90dvh] overflow-y-auto`+移动端留边（防弹窗溢出/按钮截断）、详情字段表移动端卡片式（免横滚）、文件编辑器高度自适应；其余页面/组件审下来已响应式（grid 断点/flex-wrap/truncate/hidden sm:）。`tsc -b && vite build` 过，新 dist `index-BT44V6ZJ.js` 重部署生产。
+- 2026-06-02（M4 部署）货架部署到生产 `154.9.238.144`（管家同机，host nginx 路径）：容器 healthy(8100) + 3 种子 + nginx vhost `hub.aijiaxia.cc`（nginx -t 过、不碰 jb/vcs）+ 前端 dist serve + CORS 放行 jb，**本地 Host 头全绿**；管理员 `admin`/`ITgfnbRZmF8y0pba`。⚠️ **卡 DNS**：`hub.aijiaxia.cc` 误指 `154.9.238.177`，待用户改 `.144` → certbot 收尾。
 - 2026-06-02（续）push `feat/script-hub`（`db5bbf8` 货架本体 + `b7b98fa` 协作/部署素材）；组织**双会话并行** M3+M4（`进度/协作-脚本货架对接.md` 分工合同：A 货架侧+部署 / B 管家侧 upload-from-url+?import+市场页）；M4 部署素材就绪（`脚本货架/deploy/` nginx-hub.conf + 部署到生产VPS.md runbook），货架 CORS 代码就绪待部署，DNS `hub.aijiaxia.cc` 已加。
 - 2026-06-02 调研「抽脚本做独立仓库站」→ 方案经用户批准（同仓库子目录 + 带后端 + 三对接 + 一键安装/迁移 + 同 VPS 子域名）→ **M1 后端**（25 源文件，smoke 19/19）+ **M2 部署/迁移脚本** 我亲自实现并验证；**M1 前端** 先派 opus agent（其 stall 但已产出完整 shadcn 全栈），我接手修 circular chunk + Preview 全验证闭环。后端用主项目 venv 本地跑（依赖是子集）。**货架 bundle 经管家真实校验确认兼容**。
 
