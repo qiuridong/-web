@@ -265,6 +265,9 @@ def do_login(
 
 def run(config: dict, context: Any) -> RunResult:
     logger: logging.Logger = context.logger
+    # dry-run 短路（上传/在线编辑校验时 run_id=0 instance_id=0，无真实凭证）
+    if context.run_id == 0 and context.instance_id == 0:
+        return RunResult(success=True, message="dry-run OK")
     cookie = (config.get("cookie") or "").strip()
     account = (config.get("account") or "").strip()
     password = (config.get("password") or "").strip()

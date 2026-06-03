@@ -154,18 +154,28 @@ async function saveScriptFile(payload: SaveFilePayload): Promise<FileWriteRespon
     } catch {
       detail = await resp.text();
     }
-    // 422 + dry-run 失败:把整个 detail 抛出去,UI 渲染 stderr 摘要
-    const msg =
-      typeof detail === 'object' && detail && 'detail' in detail
-        ? typeof (detail as { detail: unknown }).detail === 'string'
-          ? String((detail as { detail: string }).detail)
-          : '保存失败'
-        : typeof detail === 'string'
-          ? detail
-          : `HTTP ${resp.status}`;
+    // 解析后端错误：自定义 AppException 格式 {"error":{"code","message","details"}}
+    // details 里含 exit_code/stderr_excerpt 等 dry-run 信息
+    let msg = `HTTP ${resp.status}`;
+    let errorDetail: unknown = null;
+    if (typeof detail === 'string') {
+      msg = detail;
+    } else if (typeof detail === 'object' && detail !== null) {
+      const d = detail as Record<string, unknown>;
+      if (typeof d.error === 'object' && d.error !== null) {
+        const e = d.error as Record<string, unknown>;
+        if (typeof e.message === 'string') msg = e.message;
+        errorDetail = e.details ?? null;
+      } else if (typeof d.detail === 'string') {
+        msg = d.detail;
+        errorDetail = d;
+      } else {
+        errorDetail = d;
+      }
+    }
     const err: Error & { status?: number; detail?: unknown } = new Error(msg);
     err.status = resp.status;
-    err.detail = detail;
+    err.detail = errorDetail;
     throw err;
   }
   return (await resp.json()) as FileWriteResponse;
