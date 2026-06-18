@@ -1,38 +1,54 @@
 slug: jmcomic
 name: 禁漫天堂(JMComic)每日签到
 description: |
-  https://18comic.vip 每日签到 — **selenium + 账密版**(v1.0.0)。
+  https://18comic.vip 每日签到 — **全程真浏览器(账密登录 + 真实点击签到)**(v1.6.2)。
 
-  ## 工作原理
-  1. Xvfb 虚拟屏 + Chrome UC 模式过 Cloudflare Turnstile,拿 cf_clearance
-  2. requests 注入 cookie → POST /login(账密)→ POST /ajax/user_daily_sign
-  3. sign 接口异常时兜底:GET 首页扫 8 个繁简体"已簽到"marker 确认状态
-  4. 失败时按异常类型重试 max_retries 次(默认 3,30s 间隔)
+  ## 工作原理(v1.6.1)
+  1. Xvfb 虚拟屏 + Chrome UC 导航首页过 Cloudflare Turnstile(无头服务器靠 Xvfb;过 CF 用 uc_gui_click_captcha)
+  2. 显示登录模态框 `#login-modal` → 填 `#login_username_`/`#login_password`(勾 180 天)→
+     **`uc_click('.login_submit')` 真实点击** → 触发页面自己的 `$.post('/login')`(真浏览器上下文,CF 放行)
+  3. 导航 `/user/` 验证登录态(页面含 `data-dailyid` = 已登录)
+  4. 显示签到弹窗 `#bouns-popup` → **`uc_click('.login-bouns')` 真实点击** → 触发页面自己的 `$.post('/ajax/user_daily_sign')`
+  5. 重载 `/user/` 读 DOM 判结果(`.login-bouns` 禁用/文字「已簽到」= 已签)。**全程不发 requests / 不用脚本 fetch / 不用 curl**
+
+  ## 为什么必须全真浏览器(2026-06-17/18 多轮真机验证的结论)
+  - 6-17 起 CF 把本站防护拉高:**只认"真实浏览器上下文"里的请求**。
+  - 实测全 403:纯 requests(v1.1)、浏览器内 fetch(v1.2/1.3)、curl_cffi 模拟 Chrome(v1.4/1.5,连换韩国代理出口 IP 也 403)。
+  - 真人用真浏览器(走本 VPS 出口 IP)人工登录签到 → 成功。→ **区分变量不是 IP,是"真实浏览器 vs 程序请求"**。
+  - 所以别再把 cf_clearance 拿出来重放;让登录/签到都在真浏览器里、用真实点击触发页面原生 $.post —— 这才和"真人能成功"对齐。
+  - 点击用 `uc_click`(CDP 断开重连模拟真人);读结果用 `driver.page_source`(读已加载 DOM,非请求)。
+
+  ## v1.6.1 稳定性修复
+  - 首页 HTML 很大且广告资源多;过 CF 后先等 `.login_submit` 真出现在 DOM,不行就重导航首页一次再等。
+  - 填表改为 JS 定位 `.login_submit` 所在 form,设置 `name=username/password/login_remember`,不依赖输入框可见。
+  - 登录/签到点击前隐藏可能遮挡点击的广告/浮层(`.float-right-image`、`.black-back`、其它 modal),但保留当前目标 modal。
+  - 找不到登录表单时输出诊断:当前 URL/title/page_len/是否挑战页/关键元素计数与片段。
+
+  ## v1.6.2 出口回退 + 封锁页识别
+  - 配了 proxy 先走 proxy;若被 CF 拦(含 Attention Required 封锁页)/真首页加载不出/网络错,**自动回退本机 VPS IP 直连**重试(不消耗 max_retries)。
+  - CF 拦截页检测扩到 "Attention Required"/"you have been blocked"/1020(原只认 "Just a moment")。
+  - 重导航补一次 Turnstile 点击;过 CF 阶段输出 title/page_len 诊断。
 
   ## 资源占用(运行时)
-  - 内存:~1.5 GB 峰值(Chrome)
-  - 单次耗时:60-120 秒(等 CF 15s + UC 点击 6s × 1-5 次 + login/sign 各 < 1s)
-  - 首次部署:额外 ~30 秒装依赖(apt + pip + Chrome ~150 MB 下载)
+  - 内存:~1.5 GB 峰值(Chrome);单次耗时 60-120 秒(等 CF + 登录 + 签到);首次部署额外 ~30s 装依赖
 
   ## 部署节点要求(⚠️ 重要)
   - **Linux 节点 + root/sudo 权限**(自动装 xvfb / Chrome / chromedriver)
   - 磁盘 ≥ 500 MB / 内存 ≥ 1.5 GB / Python 3.10+
-  - **不能在主面板 Docker 容器里跑**(没 Chrome 环境)
-  - 需要 MVP-1 远程 agent 派发到 host Linux 节点(如 VPS-JM `198.51.100.10`,原脚本节点)
-  - 验证过 100% 工作的节点:VPS-JM(2026-04-18 ~ 2026-05-22 共 33 天 / 33 次 CF 全过 ✅)
+  - **不能在主面板 Docker 容器里跑**(没 Chrome 环境),需远程 agent 派发到 host Linux 节点
 
   ## 失效信号 → 处理
-  - `登录失败 status=2 errors=无效的用户名和/或密码` → 重置 JM 密码,实例配置更新
-  - `sign 接口空响应 ... 疑似 server 反爬静默拒绝` → 兜底首页 marker 会自动 fallback;若兜底也认未签,等 24h 再试(IP 信任分恢复)
-  - `经过 5 次重试仍未获取到 cf_clearance` → IP 信任分耗尽 / CF 升级,**等 24h 后会自动恢复**;若多日不行,换节点 IP
-  - 截图存 data_dir/cf_error_<ts>.jpg(详情页可查)
+  - `登录失败(疑似账密错)/ 登录后 /user/ 仍非登录态` → 核对用户名密码;或看 data_dir 截图确认登录模态框/按钮是否正常
+  - `填写登录表单失败(模态框/输入框未就绪)` → 页面结构可能变化(选择器 #login_username_/.login_submit 失效),需更新选择器
+  - `点击签到后未检测到已签状态` → 签到按钮 .login-bouns 选择器或弹窗结构变化,或点击未触发(看截图)
+  - `停在 CF 挑战页(未过 Turnstile)` → 普通浏览的 CF 都过不了(IP 信任分极低 / CF 升级),换节点 IP 或挂干净代理
+  - 截图存 data_dir/cf_error_<ts>.png(详情页可查)
 
   ## 与 host 原脚本协同
-  - host VPS-JM `/root/JMComic-Auto_Sign_in/` 是历史版本(无平台协议适配)
-  - 本实例上线后,**强烈建议停掉 host crontab 避免双调用消耗 IP 信任分**
+  - **强烈建议停掉 host crontab 上的旧 JMComic 脚本**,避免双调用消耗 IP 信任分
 
-version: 1.1.0
-author: yunkelai (基于 host 4-5 月 33 次验证版本改造 + 5-24 v1.0 首跑成功)
+version: 1.6.6
+author: yunkelai (6-18 v1.6.6:点击加JS兜底绕过不可见)
 homepage: https://18comic.vip
 
 default_cron: "0 1 * * *"      # UTC 01:00 = 北京 09:00 + random_delay 0~3600s = 09:00-10:00 窗口
@@ -43,20 +59,39 @@ fields:
   - key: username
     label: JM 用户名
     type: string
-    required: true
+    required: false
     description: |
-      18comic.vip 的登录用户名(纯数字 / 字母均可)。
+      ★主登录方式★ 18comic.vip 的登录用户名(纯数字 / 字母均可)。v1.6.1 用账密在真浏览器里登录(填表单+真实点击)。
     placeholder: "your-jm-username"
 
   - key: password
     label: JM 密码
     type: secret
-    required: true
+    required: false
     description: |
-      18comic.vip 的登录密码。
-      自动 Fernet 加密落库,前端再不可见,sandbox 解密成明文跑完即销毁。
-      ⚠️ 强烈建议:JM 账号开 2FA(若支持),并使用与日常账号不同的密码。
+      ★主登录方式★ 18comic.vip 的登录密码。自动 Fernet 加密落库,sandbox 解密成明文跑完即销毁。
+      v1.6.1 在真浏览器里填入登录表单并真实点击登录(勾 180 天),触发页面自己的 $.post('/login'),CF 放行。
     placeholder: "your-jm-password"
+
+  - key: remember_cookie
+    label: remember cookie(v1.6.1 已不用)
+    type: secret
+    required: false
+    description: |
+      ⚠️ **v1.6.0 起不再使用此字段**(保留仅为兼容旧实例配置,可留空/忽略)。
+      v1.6.1 改用账密在真浏览器里登录,不再注入/重放 remember cookie。
+    placeholder: ""
+
+  - key: proxy
+    label: 出口代理(可选,绕 IP 风控)
+    type: string
+    required: false
+    description: |
+      形如 `socks5://host:port`(或 `http://host:port`)。**非空则真浏览器(过 CF + 登录 + 签到)全程走此代理出口**,
+      让 JM/Cloudflare 看到的是代理 IP 而非本节点 IP。用于本节点 IP 被 CF 风控时换一个干净出口。
+      ⚠️ Chrome 命令行不支持 SOCKS5 认证,只能用**无认证**的 socks5/http 代理(带认证的代理这里用不了)。
+      建议优先住宅 IP 代理(机房 IP 同样易被 CF 拦)。留空 = 直连本节点 IP。
+    placeholder: "socks5://121.169.46.116:1090"
 
   - key: random_delay_sec
     label: 随机延迟(秒)
@@ -78,9 +113,9 @@ fields:
     min: 1
     max: 5
     description: |
-      签到过程中遇到 sign 接口异常 / 网络错误时,自动重试次数。
-      默认 3 次。**v1.1.0 起重试复用 cookies/session,不重启 Chrome 过 CF**,节省 IP 信任分。
-      **账号密码错时不重试**(无意义)。
+      签到过程中遇到 CF 拦截 / 接口异常 / 网络错误时,自动重试次数。默认 3 次。
+      每次重试都重新过 CF + remember 登录 + 签到(整体重来)。sign 接口瞬时抖动另有
+      浏览器内短重试(3 次 × 5s)兜底,通常一次成功不触发整体重试。**账号密码错时不重试**。
 
   - key: retry_interval_sec
     label: 重试间隔(秒)
@@ -89,22 +124,19 @@ fields:
     min: 60
     max: 1800
     description: |
-      签到失败后等多久重试。默认 300 = **5 分钟**。
-      重试期间**复用第一次过 CF 拿到的 cookies + session**(不再启 Chrome,不再 login)。
-      3 次重试 × 5 分钟 = 总耗 15 分钟,完全在 cf_clearance 有效期内。
-      仅当 sign 接口返"未登录"(server session 失效)时才会主动重过 CF。
+      整体重试之间等多久。默认 300 = **5 分钟**。每次整体重试会重新启 Chrome 过 CF + remember 登录 + 签到。
+      首次通常直接成功;只有真出错(CF 拦 / 接口异常)才会进入整体重试。
 
   - key: cf_clearance_ttl_sec
-    label: CF cookies 预估有效期(秒)
+    label: CF cookies 预估有效期(秒,已废弃)
     type: integer
     default: 1800
     min: 600
     max: 7200
     description: |
-      cf_clearance cookies 在 server 端的预估有效期。默认 1800 = **30 分钟**(保守)。
-      超过此时间还在重试时,会**主动**重新过 CF + login(浏览器再起一次)。
-      实际 cf_clearance 可能更长(几小时),这里保守取 30 分钟避免静默失效。
-      如果一次签到很慢(延迟 + 多次重试)超过 30 分钟,会重过 CF;否则单次只过 1 次 CF。
+      ⚠️ **v1.2.0 起此字段已无效**(保留仅为兼容旧实例配置,可忽略)。
+      旧版用它判断 cf_clearance 是否过期以预过 CF;v1.2.0 全程在同一个浏览器内完成,
+      不存在"把 cookie 交给 requests 后过期"的问题,故不再需要 TTL 管理。
 
 runtime:
   python_version: ">=3.10"

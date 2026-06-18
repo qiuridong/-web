@@ -1,4 +1,8 @@
-# JMComic(18comic.vip)每日签到 — selenium + 账密版
+# JMComic(18comic.vip)每日签到 — 全真浏览器账密版
+
+> **最新版本：v1.6.1（2026-06-18）**  
+> 6-17 起 Cloudflare 只认真实浏览器上下文，旧的 requests / fetch / curl_cffi 重放 cookie 方案均会 403。当前流程改为：Xvfb + SeleniumBase UC 过 CF → 等首页登录表单完整加载 → 真实浏览器填账密并点击登录 → `/user/` 里点击签到按钮。  
+> v1.6.1 额外处理首页大 HTML/广告浮层：找不到 `.login_submit` 会重导航首页一次；点击前隐藏 `.float-right-image`、`.black-back`、其它非目标 modal；失败时输出 URL/title/page_len/关键元素诊断。
 
 > **v1.0.0**(2026-05-23)— 基于 host VPS-JM 4-5 月 33 次验证过的 selenium + UC 流程改造,适配平台 sandbox_runner 协议。
 >

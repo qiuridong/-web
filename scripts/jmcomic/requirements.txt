@@ -1,3 +1,2 @@
 seleniumbase>=4.20
 xvfbwrapper>=0.2
-requests>=2.31
