@@ -51,6 +51,10 @@ docker compose logs -f backend      # 看日志
 
 ## 当前状态
 
+**2026-07-02 · 📱 jb 移动端适配收尾上线(NodeList 卡片响应式)** — 承 2026-07-01 的 P0(详情页 Tabs 横滑,根改 `ui/tabs.tsx`)+ P1(6 处多列网格移动优先)已上线,本次补上**唯一遗漏的 `NodeList.tsx`**——节点卡片头部 `flex items-start justify-between` → `flex flex-col gap-3 sm:flex-row sm:...`(手机竖排,sm+ 横向)+ 清理残留空行。本地 `pnpm build`(改动未提交故走本地构建+scp,本场景合理例外)→ 新 hash **`index-DwMZPnzz.js`**(旧 `index-BCbZxWNX.js`)→ 服务器 `dist.staging` 校验(hash+NodeList 类+P0 CSS 回归)→ 原子切换(备份 `dist.backup.20260702-105132`)→ 公网 200 + 新 hash 生效 + 旧 hash 归 0。7 个 `.tsx`(6 P1 + tabs + NodeList)+ 进度文档待提交(用户授权)。仅前端,后端未 rebuild。**续**:随后修 README tab **内容截断**(上批 `overflow-hidden` 静默裁切宽表格)——去 `overflow-hidden` + 给表格加 `overflow-x-auto` 横滚容器(GitHub 式),再部署 **`index-C6Iy98FG.js`**(备份 `dist.backup.20260702-113300`)。共 7 个 `.tsx`(其中 `ScriptDetail.tsx` 含 P1 网格 + README 修复两处)+ 进度文档本会话提交。**待**:360px 真机点验(tab 可滑到 README + 节点卡片竖排 + README 宽表格可横滑)。详见 [变更/2026-07-01-jb移动端适配修复.md](变更/2026-07-01-jb移动端适配修复.md) 末尾「续」段。
+
+**2026-06-19 · 🛠 服务器维护 + 🔑 测试账号 + 📐 多租户设计拍板(待实施)** — 用户三件事。**①服务器只读巡检(两台)**:154(主面板+货架+rsshub)全绿(负载 0.23 / 磁盘 32% / 内存充足 / 3 容器 healthy / nginx OK / 证书 jb 44d·hub 62d 等均有效 / jb+hub 均 200 / 无错误日志);VPS-JM 节点经面板看在线(心跳正常、无卡住运行)。**安全清理(已做+验证服务无碍)**:22 个 `.bak` 移到 `/opt/signin-panel/_backups/jmcomic/`(live 文件完好,jmcomic 现 v1.6.6)+ `docker builder prune` 回收 898MB(磁盘 32%→30%)。未动:98 个 apt 更新(0 安全,留窗口)/ VPS-JM 失败截图(无 SSH)。**②建测试账号(两站,正规 bcrypt 直插)**:主面板 `test`/`Test-JFYIwLYiIE_8`(id=2)、货架 `test`/`Test-Qu_QVZhVNJYc`(id=2),均 `is_admin=False`+active,verify_password 通过。注:**当前数据仍共享**(隔离未做);v1 不校验 is_admin 故暂全权限。**③多租户设计拍板**:主面板=**全数据隔离**(脚本=全局共享目录;实例/**节点(每用户自己的)**/运行/通知=按 owner_id 隔离;admin=超管看全部+管用户,普通用户只看自己);货架=**只多管理员**(不隔离,公共目录)。技术摸底:agent 已 token 隔离(`sa_xxx` Bearer→bcrypt 全表比对),Node 加 owner_id 即可;alembic 齐(3 版本)。**路线图(分支 `feat/multi-tenant`,分阶段可回滚)**:P1 用户管理+超管(纯新增低风险)→ P2 加 owner_id+迁移存量归 admin → P3 查询过滤开隔离(中风险,admin/test 交叉验)→ P4 每用户节点 → P5 前端收尾 → P6 货架多管理员。**待用户**:批准从 P1 起步(或先看某阶段详设)。
+
 **2026-06-18 深夜 · ✅✅✅ JMComic 签到真机修复成功(v1.6.6,run 122)** — 承当晚 v1.6.1，真机连测 6 版逐个修 CF 对抗，**run 122 全链路签到成功**(`签到成功:今日已簽到`,outlet=vps-direct)。关键修复:v1.6.2 出口回退本机(代理被封自动回退 VPS 直连)+封锁页识别;v1.6.3 修 `challenge-platform` 误判真首页(改 title+体积守卫);v1.6.5 拿 cf_clearance 后主动 reload 进真首页;**v1.6.6 制胜=点击加 JS 兜底**(`execute_script click()` 绕过 modal 里登录/签到按钮不可见)。全链路:代理被封→回退本机→本机过 CF(546KB 真首页)→填表→JS click 登录→`data-dailyid=69` 登录态→JS click 签到→`今日已簽到`。**收尾**:用户拍板去掉代理(后端 crypto 安全清空 instance#3 proxy,备份在案);max_retries=1;服务器备份链 `main.py.bak.v160~v165`。**待**:git push(用户授权)+明早 scheduled 自动跑验证。⚠️**勿连测**(本机 IP 信任分会被连测拉低)。详见 [分支/feat-script-hub.md](分支/feat-script-hub.md)。
 
 **2026-06-18 · 🩹 JMComic v1.6.1 登录表单等待 + 广告浮层清理(待生产真跑)** — 针对“CF 过了、浏览器活着，但 `#login_username_` 在 DOM 里找不到”的 run 115 类问题。复查 `D:\jm.har` / `D:\jm2.har` / `D:\jm3.har`：真首页 HTML 确实静态含 `login_username_/.login_submit`，同时也有大量广告资源和 `.float-right-image` / `.black-back` / `popup` 浮层。结论：**广告浮层更可能影响真实点击，不太会导致 DOM 完全没有登录字段**；主因仍是过 CF 后首页大 HTML/慢代理加载未完整或尚未切换到真首页。v1.6.1 修复：等 `.login_submit` 出现，不行重导航首页一次；JS 定位提交按钮所在 form 填 `username/password/login_remember`；登录/签到点击前隐藏广告/浮层但保留目标 modal；找不到时 dump URL/title/page_len/是否挑战页/关键元素；requirements 移除旧 requests/curl_cffi。新增 `backend/tests/test_jmcomic_v161.py`，本地 3/3 过 + `py_compile` + manifest parse + sandbox dry-run 过。**下一步**：部署主脚本到生产/节点，重扫 v1.6.1，把实例 `max_retries=1` 后立即运行，读日志确认是否进入 `/user/` 登录态。
@@ -254,8 +258,9 @@ docker compose logs -f backend      # 看日志
 
 | 分支 | 状态 | 文件 |
 |---|---|---|
-| `main` | ✅ 生产在跑(MVP-5 + 远程 agent + 外观完整版)`9bfaaa9` | [分支/main.md](分支/main.md) |
-| `feat/ui-fullbg-mobile-runcancel` | 🔄 **当前** · 壁纸整屏统一 + 手机端 + 运行取消 + 删脚本(两会话并行,有未提交 AppLayout WIP) | [分支/feat-ui-fullbg-mobile-runcancel.md](分支/feat-ui-fullbg-mobile-runcancel.md) |
+| `main` | ✅ 生产基线(MVP-5 + 远程 agent + 外观完整版)`9bfaaa9` | [分支/main.md](分支/main.md) |
+| `feat/script-hub` | 🔄 **当前**(HEAD `87f6b9d`)· 脚本货架子项目(M1-M4 上线)+ JMComic v1.6.6 迭代 + jb 移动端适配收尾 | [分支/feat-script-hub.md](分支/feat-script-hub.md) |
+| `feat/ui-fullbg-mobile-runcancel` | ⏸ 非当前(历史)· 壁纸整屏 + 手机端 + 运行取消 + 删脚本 | [分支/feat-ui-fullbg-mobile-runcancel.md](分支/feat-ui-fullbg-mobile-runcancel.md) |
 | `fix/script-list-delete-with-files` | 🔄 PR #6 OPEN · 彻底删除脚本(含磁盘),另一会话收尾 | — |
 | `fix/mobile-responsive` | ⏸ PR #7 OPEN · 代码已随 #8 super-PR 进 main | — |
 
@@ -263,6 +268,7 @@ docker compose logs -f backend      # 看日志
 
 | 日期 | 标题 | 文件 |
 |---|---|---|
+| 2026-07-01 | 🔍 **jb 移动端适配问题审计定位(只定位不修复)** — 全量审计 `frontend/` 响应式反模式,定位用户报告的详情页 Tabs 横向溢出 bug(`ScriptDetail.tsx:282` TabsList 缺 `overflow-x-auto` + `TabsTrigger` `whitespace-nowrap` → 6 tab 手机溢出点不到)+ 7 处固定多列网格无移动断点(P1,重点 `InstanceFormSheet.tsx:225`/`Settings.tsx:773`)+ 固定像素宽 Select(P2)。**本会话零改码**,修复交另一会话 | [变更/2026-07-01-jb移动端适配问题审计定位.md](变更/2026-07-01-jb移动端适配问题审计定位.md) |
 | 2026-06-02 | 🗂 **附属子项目「脚本货架」M1-M4 上线 + 双会话对接** — 独立全栈(FastAPI+SQLite+React/shadcn)集中存管签到脚本、产出兼容管家的 zip,上线 `https://hub.aijiaxia.cc`(LE 证书 + 全响应式 + 后端 smoke 19/19 + bundle 喂管家校验全过 + 一键安装/迁移)。M3 管家对接 🅱 会话并行 | [分支/feat-script-hub.md](分支/feat-script-hub.md) · [协作](协作-脚本货架对接.md) |
 | 2026-05-30 | 🔧 **接手前端体验改进 + 进度核实修复**(本档) — 壁纸整屏统一 + 手机端右侧白块,新分支 `feat/ui-fullbg-mobile-runcancel`,两会话并行(壁纸/手机 vs 取消/删除);发现 `AppLayout.tsx` 已有未提交壁纸统一 WIP;修进度:#9/#10 已 merge、补全本表 PR #5/#7/#8/#9 链接、重写未决项对齐真实 PR 号 | [分支/feat-ui-fullbg-mobile-runcancel.md](分支/feat-ui-fullbg-mobile-runcancel.md) |
 | 2026-05-27 凌晨 | 🧹 **PR #6/#9 解 main 冲突全 MERGEABLE** — PR #8(super-PR 含 #7)merge 后,#6(删脚本)/#9(code-review 14 fix)与 main 冲突;#6 接 origin/main 时间线、#9 全 `--ours`(review fixes 完整保留),两 merge commit push,全 `MERGEABLE/CLEAN`,hash `index-C7rQPvNW.js`。后用户 merge #9/#10 进 main | [变更/2026-05-27-PR6-PR9冲突解决+全MERGEABLE.md](变更/2026-05-27-PR6-PR9冲突解决+全MERGEABLE.md) |
@@ -325,6 +331,7 @@ docker compose logs -f backend      # 看日志
 
 | 项 | 备注 |
 |---|---|
+| **📱 jb 移动端适配修复** | ✅ **2026-07-01 已修复上线**。P0 详情页 Tabs 溢出(根源改 `ui/tabs.tsx` TabsList 基类加 `overflow-x-auto`,一次根治 ScriptDetail/Settings/NotificationHub 三处同款)+ P1 6 处固定多列网格加 `grid-cols-1 sm:`(InstanceFormSheet/Settings 背景预设/RunDetailSheet/ScriptDetail×2/NotificationHub)。P2 固定像素宽 Select + ScriptCard:210 按审计缓议未动。`pnpm build` 过、CSS 规则确认发出、生产已部署(2026-07-01 `index-BCbZxWNX.js`)。**2026-07-02 收尾**:补上遗漏的 `NodeList.tsx`(节点卡片头部手机竖排 `flex-col ... sm:flex-row`)+ 重新部署 `index-DwMZPnzz.js`(备份 `dist.backup.20260702-105132`)。**续**:修 README tab 内容截断(去 `overflow-hidden` + 表格 `overflow-x-auto` 横滚容器)→ `index-C6Iy98FG.js`(备份 `dist.backup.20260702-113300`)。**⚠️ 360px 真机点验(Tabs 可滑到 README + 节点卡片竖排 + README 宽表格可横滑)待用户确认**。详见 [变更/2026-07-01-jb移动端适配修复.md](变更/2026-07-01-jb移动端适配修复.md) |
 | **🎨 壁纸背景整屏统一(本分支 · 本会话)** | 🔄 外观(PR #8)壁纸只铺内容区,侧栏/顶栏纯色割裂 → 要铺满整个 app shell。**`AppLayout.tsx` 已有未提交 WIP**(另一会话 +41/−31)实现雏形:侧栏/顶栏半透明毛玻璃 + 背景上提根容器 + overlay z-0/内容 z-10。**待定边界后接管细化** |
 | **📱 手机端右侧白块 + 响应式收尾(本分支 · 本会话)** | 🔄 手机端最右侧大片白块(疑似溢出/未铺背景)。WIP 里 `<main>` 已加 `overflow-x-hidden`(注释称顺带修白块),待真机/preview 复现确认根治;Phase 2 polish(ScriptCard / 工具栏折行 / 44×44 触控)一并 |
 | **⏹ 运行取消 + 🗑 删除已上传脚本(本分支 · 另一会话)** | 🔄 取消等待/执行中 run(后端 `cancel_run` 已有)+ 删除 VPS 脚本(`deployed_scripts`/`pending_actions.delete` 已就绪,PR #6 OPEN)。⚠️ 另一会话做,**本会话不碰**;两会话共享工作树,留意 `AppLayout.tsx` 冲突 |

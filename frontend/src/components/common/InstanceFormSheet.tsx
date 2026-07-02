@@ -222,7 +222,7 @@ export function InstanceFormSheet({
                   value={meta.node_id ?? '1'}
                   onChange={(v) => patchMeta({ node_id: v })}
                 />
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <div className="space-y-1.5">
                     <Label htmlFor="meta-timeout">超时(秒)</Label>
                     <Input

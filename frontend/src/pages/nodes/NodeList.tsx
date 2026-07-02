@@ -460,7 +460,7 @@ function NodeCard({ node }: { node: NodeListItem }) {
   return (
     <>
       <div className="rounded-lg border border-border bg-card p-4 shadow-sm transition-shadow hover:shadow-md">
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex min-w-0 items-start gap-3">
             <div
               className={[

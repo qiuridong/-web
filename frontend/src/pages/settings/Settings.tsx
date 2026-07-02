@@ -770,7 +770,7 @@ function BrandingCard() {
             {/* 预设背景快捷选择(无需上传) */}
             <div className="space-y-1.5">
               <Label className="text-xs">快捷预设(一键应用,无需上传)</Label>
-              <div className="grid grid-cols-6 gap-1.5">
+              <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-6">
                 {BACKGROUND_PRESETS.map((p) => {
                   const selected = draft.background_image_data_url === p.dataUrl;
                   return (

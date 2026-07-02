@@ -91,7 +91,7 @@ export function RunDetailSheet({ open, onOpenChange, runId }: RunDetailSheetProp
             <p className="text-sm text-muted-foreground">无数据</p>
           ) : (
             <div className="space-y-6">
-              <div className="grid grid-cols-2 gap-x-6 gap-y-4 text-sm">
+              <div className="grid grid-cols-1 gap-x-6 gap-y-4 text-sm sm:grid-cols-2">
                 <Field label="状态">
                   <StatusBadge status={runStatusToBadgeStatus(run.status)} label={run.status} />
                 </Field>
@@ -125,7 +125,7 @@ export function RunDetailSheet({ open, onOpenChange, runId }: RunDetailSheetProp
                   <code className="font-mono text-xs">{run.host ?? '—'}</code>
                 </Field>
                 {run.result_message ? (
-                  <div className="col-span-2">
+                  <div className="sm:col-span-2">
                     <div className="mb-1 text-[11px] uppercase tracking-wider text-muted-foreground/70">
                       result_message
                     </div>

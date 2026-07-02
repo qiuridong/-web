@@ -433,9 +433,9 @@ function DetailTab({
 function OverviewPanel({ script }: { script: ScriptDetailModel }) {
   return (
     <div className="grid gap-4 lg:grid-cols-3">
-      <Card className="col-span-2 p-6">
+      <Card className="col-span-1 p-6 lg:col-span-2">
         <h3 className="mb-4 text-sm font-semibold text-foreground">基本信息</h3>
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-4 text-sm">
+        <dl className="grid grid-cols-1 gap-x-6 gap-y-4 text-sm sm:grid-cols-2">
           <Field label="slug">
             <code className="font-mono text-xs text-muted-foreground">
               {script.slug}
@@ -722,7 +722,7 @@ function FieldExtraAttrs({ field }: { field: ScriptField }) {
   return (
     <div className="mt-3 space-y-2 border-t border-border/50 pt-3">
       {items.length > 0 ? (
-        <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
+        <dl className="grid grid-cols-1 gap-x-3 gap-y-1 text-[11px] sm:grid-cols-2">
           {items.map((it) => (
             <div key={it.label} className="flex min-w-0 gap-1">
               <dt className="shrink-0 text-muted-foreground/70">{it.label}:</dt>
@@ -769,12 +769,17 @@ function ReadmePanel({ md }: { md: string }) {
   }
   return (
     <Card className="p-6 md:p-8">
-      <article className="prose prose-zinc max-w-3xl text-sm dark:prose-invert">
+      <article className="prose prose-zinc max-w-none break-words text-sm dark:prose-invert prose-pre:overflow-x-auto prose-pre:whitespace-pre-wrap prose-code:break-words prose-a:break-all">
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           components={{
             a: ({ ...props }) => (
               <a {...props} target="_blank" rel="noopener noreferrer" />
+            ),
+            table: ({ ...props }) => (
+              <div className="overflow-x-auto">
+                <table {...props} />
+              </div>
             ),
           }}
         >
@@ -825,7 +830,7 @@ function DetailSkeleton() {
       </div>
       <Skeleton className="h-10 w-full" />
       <div className="grid gap-4 lg:grid-cols-3">
-        <Skeleton className="col-span-2 h-[300px]" />
+        <Skeleton className="col-span-1 h-[300px] lg:col-span-2" />
         <Skeleton className="h-[300px]" />
       </div>
     </div>
