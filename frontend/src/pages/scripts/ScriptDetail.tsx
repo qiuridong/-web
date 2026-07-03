@@ -123,7 +123,7 @@ export function ScriptDetail() {
   // === loading skeleton ===
   if (isLoading) {
     return (
-      <div className="mx-auto w-full max-w-[1440px] px-6 py-8">
+      <div className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 sm:py-8">
         <DetailSkeleton />
       </div>
     );
@@ -132,7 +132,7 @@ export function ScriptDetail() {
   // === error 态 ===
   if (isError || !script) {
     return (
-      <div className="mx-auto w-full max-w-[1440px] px-6 py-8">
+      <div className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 sm:py-8">
         <Button
           variant="ghost"
           size="sm"
@@ -174,7 +174,7 @@ export function ScriptDetail() {
 
   // === 主渲染 ===
   return (
-    <div className="mx-auto w-full max-w-[1440px] px-6 py-8">
+    <div className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 sm:py-8">
       {/* breadcrumb 用 PageHeader 内置 */}
       <PageHeader
         title={script.name}
@@ -768,18 +768,38 @@ function ReadmePanel({ md }: { md: string }) {
     );
   }
   return (
-    <Card className="p-6 md:p-8">
-      <article className="prose prose-zinc max-w-none break-words text-sm dark:prose-invert prose-pre:overflow-x-auto prose-pre:whitespace-pre-wrap prose-code:break-words prose-a:break-all">
+    <Card className="min-w-0 p-5 sm:p-6 md:p-8">
+      {/* 整段 README 作为单一横向滚动区:窄内容(段落)按视口换行,
+          超宽内容(表格 / ASCII 代码块)触发整段一起横滑,而非各自局部滚动。
+          overflow-x-auto 落在 article 上,超宽子元素不会撑破 Card / 页面。 */}
+      <article className="prose prose-zinc min-w-0 max-w-none overflow-x-auto break-words text-sm dark:prose-invert prose-code:break-words prose-a:break-all">
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           components={{
             a: ({ ...props }) => (
               <a {...props} target="_blank" rel="noopener noreferrer" />
             ),
-            table: ({ ...props }) => (
-              <div className="overflow-x-auto">
-                <table {...props} />
-              </div>
+            code: ({ className, children, node, ...props }) => {
+              const isInline = node?.position?.start.line === node?.position?.end.line;
+              return (
+                <code
+                  {...props}
+                  className={cn(
+                    className,
+                    isInline && 'break-all whitespace-normal',
+                  )}
+                >
+                  {children}
+                </code>
+              );
+            },
+            // 表格 / 代码块保持自身完整宽度(min-w-max,不裁剪、不打乱),
+            // 超宽时由外层 article 整段横滑露出,不再各自套局部滚动容器
+            table: ({ className, ...props }) => (
+              <table {...props} className={cn(className, 'min-w-max')} />
+            ),
+            pre: ({ className, ...props }) => (
+              <pre {...props} className={cn(className, 'min-w-max')} />
             ),
           }}
         >

@@ -144,7 +144,9 @@ function ScriptCardImpl({
   return (
     <Card
       className={cn(
-        'group relative flex min-h-[220px] flex-col gap-4 p-5',
+        'group relative flex min-h-[220px] min-w-0 flex-col [container-type:inline-size]',
+        '[--card-pad:clamp(1rem,5.45cqw,1.25rem)] [--card-gap:clamp(0.875rem,3.8cqw,1rem)] [--card-gap-tight:clamp(0.375rem,1.8cqw,0.625rem)] [--card-icon:clamp(2.5rem,13.1cqw,3rem)] [--card-icon-glyph:clamp(1rem,5.2cqw,1.5rem)] [--card-title:clamp(0.9375rem,4.35cqw,1rem)] [--card-body:clamp(0.8125rem,3.6cqw,0.875rem)] [--card-meta:clamp(0.75rem,3.1cqw,0.8125rem)] [--card-slug:clamp(0.6875rem,2.9cqw,0.75rem)] [--card-action:clamp(0.75rem,3.1cqw,0.875rem)]',
+        'gap-[var(--card-gap)] p-[var(--card-pad)]',
         'transition-all duration-200 ease-[cubic-bezier(0.25,1,0.5,1)]',
         'hover:-translate-y-0.5 hover:shadow-md',
         onClick && 'cursor-pointer',
@@ -153,18 +155,22 @@ function ScriptCardImpl({
       onClick={onClick ? () => onClick(script.slug) : undefined}
     >
       {/* 顶部:icon + 名称 + 状态点 */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-start gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-[var(--card-gap-tight)]">
+        <div className="flex min-w-0 flex-1 items-start gap-[var(--card-gap)]">
           {Icon ? (
             <div
-              className="flex size-12 shrink-0 items-center justify-center rounded-xl border border-border/50"
+              className="flex size-[var(--card-icon)] shrink-0 items-center justify-center rounded-xl border border-border/50"
               style={{ background: `color-mix(in oklch, var(--chart-${variant}) 12%, transparent)` }}
             >
-              <Icon className="size-6" strokeWidth={1.75} style={{ color: `var(--chart-${variant})` }} />
+              <Icon
+                className="size-[var(--card-icon-glyph)]"
+                strokeWidth={1.75}
+                style={{ color: `var(--chart-${variant})` }}
+              />
             </div>
           ) : (
             <div
-              className="flex size-12 shrink-0 items-center justify-center rounded-xl text-base font-semibold"
+              className="flex size-[var(--card-icon)] shrink-0 items-center justify-center rounded-xl text-[length:var(--card-title)] font-semibold"
               style={{
                 background: `color-mix(in oklch, var(--chart-${variant}) 14%, transparent)`,
                 color: `var(--chart-${variant})`,
@@ -175,10 +181,10 @@ function ScriptCardImpl({
             </div>
           )}
           <div className="min-w-0 flex-1">
-            <h3 className="truncate text-base font-semibold leading-tight text-foreground">
+            <h3 className="truncate text-[length:var(--card-title)] font-semibold leading-tight text-foreground">
               {script.name}
             </h3>
-            <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground/80">
+            <p className="mt-1 truncate font-mono text-[length:var(--card-slug)] text-muted-foreground/80">
               {script.slug}
               {script.version ? <span className="ml-1.5 text-muted-foreground/50">v{script.version}</span> : null}
             </p>
@@ -197,17 +203,17 @@ function ScriptCardImpl({
 
       {/* 描述 */}
       {script.description ? (
-        <p className="line-clamp-2 text-sm leading-relaxed text-muted-foreground">
+        <p className="line-clamp-2 text-[length:var(--card-body)] leading-relaxed text-muted-foreground">
           {script.description}
         </p>
       ) : (
-        <p className="line-clamp-2 text-sm italic leading-relaxed text-muted-foreground/50">
+        <p className="line-clamp-2 text-[length:var(--card-body)] italic leading-relaxed text-muted-foreground/50">
           (无描述)
         </p>
       )}
 
       {/* 元信息 */}
-      <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-muted-foreground/90">
+      <div className="grid grid-cols-2 gap-x-[var(--card-gap)] gap-y-[var(--card-gap-tight)] text-[length:var(--card-meta)] text-muted-foreground/90">
         <div className="flex items-center gap-1.5">
           <Layers className="size-3.5 text-muted-foreground/60" strokeWidth={1.75} />
           <span className="tabular-nums">
@@ -221,9 +227,9 @@ function ScriptCardImpl({
           <Clock className="size-3.5 text-muted-foreground/60" strokeWidth={1.75} />
           <span className="tabular-nums">7d {successRate}</span>
         </div>
-        <div className="col-span-2 flex items-center gap-1.5">
+        <div className="col-span-2 flex min-w-0 items-center gap-1.5">
           <Calendar className="size-3.5 text-muted-foreground/60" strokeWidth={1.75} />
-          <span className="tabular-nums">
+          <span className="min-w-0 tabular-nums">
             上次 {formatRelative(script.last_run_at)}
             <span className="mx-1.5 text-muted-foreground/40">·</span>
             下次 {formatRelative(script.next_run_at)}
@@ -232,18 +238,21 @@ function ScriptCardImpl({
       </div>
 
       {/* 底部:状态 badge + actions */}
-      <div className="mt-auto flex items-center justify-between gap-2 pt-1">
-        <Badge variant="outline" className="font-normal text-muted-foreground">
+      <div className="mt-auto flex flex-wrap items-center gap-[var(--card-gap-tight)] pt-1">
+        <Badge
+          variant="outline"
+          className="font-normal text-[length:var(--card-meta)] text-muted-foreground"
+        >
           {statusLabel(script.last_run_status)}
         </Badge>
-        <div className="flex items-center gap-1.5">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-[var(--card-gap-tight)]">
           {onDelete ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="size-8 p-0"
+                  className="size-8 p-0 text-[length:var(--card-action)]"
                   aria-label="更多操作"
                   onClick={(e) => e.stopPropagation()}
                 >
@@ -278,6 +287,7 @@ function ScriptCardImpl({
             <Button
               variant="ghost"
               size="sm"
+              className="text-[length:var(--card-action)]"
               onClick={(e) => {
                 e.stopPropagation();
                 onConfigure(script.slug);
@@ -291,6 +301,7 @@ function ScriptCardImpl({
             <Button
               variant="default"
               size="sm"
+              className="text-[length:var(--card-action)]"
               onClick={(e) => {
                 e.stopPropagation();
                 onTrigger(script.slug);

@@ -285,7 +285,7 @@ export function ScriptList() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-[1440px] px-6 py-8">
+    <div className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 sm:py-8">
       <PageHeader
         title="脚本"
         description={
