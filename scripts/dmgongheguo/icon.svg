@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="动漫共和国登录保活">
+  <rect width="64" height="64" rx="14" fill="#252b3a"/>
+  <path d="M18 23h28v25H18z" fill="none" stroke="#fb4965" stroke-width="4"/>
+  <path d="M24 18v10M40 18v10M18 30h28" stroke="#fb4965" stroke-width="4" stroke-linecap="round"/>
+  <path d="m25 39 5 5 10-11" fill="none" stroke="#f5d7a3" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

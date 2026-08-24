@@ -1,0 +1,104 @@
+slug: dmgongheguo
+name: 动漫共和国每日签到
+description: |
+  在官方 Android Emulator 上检查/恢复动漫共和国 App 登录态，并幂等执行每日签到。
+
+  验证码采用本地 ddddocr + 目标字形模板的保守集成：只提交完整 token 链、
+  多阈值一致且运算符被双通道确认的乘法题；加减除、两位数边界不清或任何
+  低置信图片都会自动刷新，提交前再核对验证码像素指纹没有变化。
+
+  任务中心同时使用“待签到”“签到成功弹窗”“已签到”三态模板；只有待签到
+  前置模板通过才点击一次，已签到会直接返回成功，不重复触发每日唯一动作。
+version: 1.1.0
+author: yunkelai
+
+default_cron: "20 8 * * *"
+default_timeout_sec: 1200
+icon: icon.svg
+
+fields:
+  - key: account
+    label: 邮箱账号
+    type: string
+    required: false
+    description: 登录态失效时使用；实例配置整体由面板 Fernet 加密存储。
+    placeholder: "you@example.com"
+
+  - key: password
+    label: 登录密码
+    type: secret
+    required: false
+    description: 登录态失效时使用；当前安全输入器支持字母、数字以及 @ . -。
+
+  - key: adb_path
+    label: ADB 路径
+    type: string
+    required: true
+    default: "/opt/android-sdk/platform-tools/adb"
+
+  - key: adb_serial
+    label: ADB 设备序列号
+    type: string
+    required: true
+    default: "emulator-6554"
+    description: 安全合同锁定 emulator-6554，填写其它值会 fail-closed。
+
+  - key: captcha_max_images
+    label: 单次最多查看验证码数
+    type: integer
+    default: 18
+    min: 4
+    max: 30
+    description: 低置信图片只刷新不提交；弹窗超时后会重新打开继续计数。
+
+  - key: captcha_max_submissions
+    label: 最多验证码提交次数
+    type: integer
+    default: 2
+    min: 1
+    max: 3
+    description: 限制真正提交次数；刷新不计入此值。
+
+  - key: captcha_refresh_interval_sec
+    label: 验证码刷新间隔（秒）
+    type: integer
+    default: 12
+    min: 5
+    max: 30
+    description: 服务端有刷新频率限制；建议保持 12 秒，避免“获取问题过于频繁”。
+
+  - key: captcha_min_confidence
+    label: 验证码最低置信度
+    type: string
+    default: "0.72"
+    pattern: "^0\\.(5[0-9]|6[0-9]|7[0-9]|8[0-9]|9[0-9])$"
+    description: 建议保持 0.72；调高会增加刷新，调低会增加误提交风险。
+
+  - key: auto_install_ocr
+    label: 自动安装 OCR 环境
+    type: boolean
+    default: true
+    description: 首次运行用 uv 在实例 data_dir 创建 Python 3.12 独立 venv。
+
+  - key: uv_path
+    label: uv 路径（可选）
+    type: string
+    required: false
+    default: "/root/.local/bin/uv"
+
+  - key: ocr_python
+    label: 已有 OCR Python（可选）
+    type: string
+    required: false
+    description: 留空自动使用 data_dir/.ocr-venv；填写后必须通过自检。
+
+  - key: random_delay_sec
+    label: 随机延迟（秒）
+    type: integer
+    default: 0
+    min: 0
+    max: 1800
+
+runtime:
+  python_version: ">=3.10"
+  isolated: true

@@ -1,0 +1,5 @@
+# main.py 只使用标准库。OCR worker 由 main.py 固定安装到实例 data_dir/.ocr-venv：
+ddddocr==1.6.1
+onnxruntime>=1.20,<2
+opencv-python-headless>=4.10,<5
+Pillow>=10,<13
