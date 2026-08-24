@@ -51,6 +51,8 @@ docker compose logs -f backend      # 看日志
 
 ## 当前状态
 
+**2026-08-25 · ✅ 动漫共和国 v1.2.1 支持管家下发新账号自动换绑** — 情况 A 已简化为只编辑原 instance `5`：同时填写新邮箱和新密码，保持“账号变化时自动换绑”开启，Agent 检测到哈希变化后会核验旧 App/AVD 与昵称身份，依次执行 `force-stop → pm clear → 删除旧标记 → sync → 新账号验证码登录 → 写新绑定 → 幂等签到 → 关闭 Emulator`；不再需要 SSH、手工清理、新建实例或新建 AVD。情况 B（两账户同时保留）仍是一账户一 AVD 一实例。本地 `40 passed`、Ruff 和 sandbox dry-run 全绿；v1.2.1 已扫描到生产并同步 UK Agent，四份 37 文件摘要一致。当前没有触发真实换绑或签到，instance `5` 仍等待 2026-08-25 08:20；真实新账户闭环要等用户在面板填写新凭据。详见 [变更/2026-08-25-动漫共和国管家下发自动换绑.md](变更/2026-08-25-动漫共和国管家下发自动换绑.md)。
+
 **2026-08-24 · ✅ 动漫共和国验证码登录、按需 Emulator 与每日签到已接入 UK VPS 和生产面板** — `dmgongheguo` 已升级到 v1.2.0：在保留高置信验证码自动登录和三态幂等签到的基础上，新增 systemd 任务前冷启动/`finally` 自动关机、固定端口全局串行锁、每账户独立 AVD 绑定与昵称字形复核。生产 run `46` 从 ADB/QEMU 完全关闭状态启动 `poc34`，`32796 ms` 就绪，确认 `already_logged_in=true`、`already_checked_in=true` 和 `account_binding_verified=true`，随后 `1468 ms` 关机；当前 unit 为 `static/inactive`、ADB 无设备、QEMU 无进程，空闲 available RAM `3.4 GiB`。用户看到的 run `43`～`45` 是上线验收，均在签到点击前安全失败并自动关机，没有重复签到；对应的同步落盘、绑定迁移和 App 冷启动等待问题均已修复。下一次 scheduled run 为 2026-08-25 08:20（Asia/Shanghai）。本地 `35 passed`、ruff 全绿，主脚本/seed/主面板/Agent 四份各 37 文件一致；账号密码只存在 Fernet 加密实例中。详见 [变更/2026-08-24-动漫共和国验证码登录与VPS签到自动化.md](变更/2026-08-24-动漫共和国验证码登录与VPS签到自动化.md)。
 
 **2026-07-02 · 📱 jb 移动端适配收尾上线(NodeList 卡片响应式)** — 承 2026-07-01 的 P0(详情页 Tabs 横滑,根改 `ui/tabs.tsx`)+ P1(6 处多列网格移动优先)已上线,本次补上**唯一遗漏的 `NodeList.tsx`**——节点卡片头部 `flex items-start justify-between` → `flex flex-col gap-3 sm:flex-row sm:...`(手机竖排,sm+ 横向)+ 清理残留空行。本地 `pnpm build`(改动未提交故走本地构建+scp,本场景合理例外)→ 新 hash **`index-DwMZPnzz.js`**(旧 `index-BCbZxWNX.js`)→ 服务器 `dist.staging` 校验(hash+NodeList 类+P0 CSS 回归)→ 原子切换(备份 `dist.backup.20260702-105132`)→ 公网 200 + 新 hash 生效 + 旧 hash 归 0。7 个 `.tsx`(6 P1 + tabs + NodeList)+ 进度文档待提交(用户授权)。仅前端,后端未 rebuild。**续**:随后修 README tab **内容截断**(上批 `overflow-hidden` 静默裁切宽表格)——去 `overflow-hidden` + 给表格加 `overflow-x-auto` 横滚容器(GitHub 式),再部署 **`index-C6Iy98FG.js`**(备份 `dist.backup.20260702-113300`)。共 7 个 `.tsx`(其中 `ScriptDetail.tsx` 含 P1 网格 + README 修复两处)+ 进度文档本会话提交。**待**:360px 真机点验(tab 可滑到 README + 节点卡片竖排 + README 宽表格可横滑)。详见 [变更/2026-07-01-jb移动端适配修复.md](变更/2026-07-01-jb移动端适配修复.md) 末尾「续」段。
@@ -351,9 +353,9 @@ docker compose logs -f backend      # 看日志
 
 > 30 秒读完,你就能继续干活。
 
-1. **现在卡在哪**(2026-08-24):在分支 `feat/script-hub`。**动漫共和国 v1.2.0 已完成开发、部署和真实按需启停闭环**；run `46` 成功，当前 UK Emulator 为 `static/inactive`，等待 2026-08-25 08:20 第一次 scheduled run 自然观察。工作树同时保留实例接力、JM、前端等其它会话的未提交改动，处理时必须继续隔离文件所有权。
-2. **上一步做了什么**(2026-08-24):新增 `helpers/emulator_lifecycle.py`、systemd 模板与安装器，主脚本加入全局串行锁、AVD/账号/昵称三重绑定、冷启动安全等待和异常自动关机；本地 `35 passed`、Ruff 全绿、四份 37 文件一致，生产 run `46` 从关机态完成“启动→已签到复核→关机”。详细证据见 2026-08-24 动漫共和国变更档。
-3. **下一步要做什么**:(a) 只观察下一次 scheduled run，不为测试重复触发签到；(b) 若新增账号，先创建独立持久化 AVD，再建实例并错开 10–15 分钟，禁止共用 `poc34`；(c) 实例接力仍是 opt-in，待用户在面板勾开关并做真机故障转移验收。
+1. **现在卡在哪**(2026-08-25):在分支 `feat/script-hub`。**动漫共和国 v1.2.1 管家下发自动换绑已开发并部署**；当前账户没有变化，因此未触发 `pm clear` 或签到，UK Emulator 仍为 `static/inactive`。等待用户在 instance `5` 同时填写真实新邮箱和新密码，或等待 08:20 普通定时运行。工作树同时保留实例接力、JM、前端等其它会话的未提交改动，处理时必须继续隔离文件所有权。
+2. **上一步做了什么**(2026-08-25):在 v1.2.0 生命周期与三重绑定之上加入“账号哈希变化 → 核验旧身份 → 清旧 App 会话/标记 → 新账号验证码登录 → 成功后写新绑定”的一次性状态机；本地 `40 passed`、Ruff 全绿、本地和 UK sandbox dry-run 通过，四份 37 文件一致，生产扫描和 Agent bundle 同步完成。
+3. **下一步要做什么**:(a) 用户替换测试账户时只需编辑 instance `5`，同时重新输入新账号和新密码并保存；(b) 保存后立即运行一次，核实 `account_rebound=true`、新昵称绑定和 Emulator 自动关闭；(c) 若两个账户同时保留，再为第二账户创建独立 AVD/实例并错开时间；(d) 实例接力仍是 opt-in，待用户另行做真机故障转移验收。
 4. **重要约束**(违反就回炉):
    - 阅读 `设计/后端架构.md` § 3、4、5 后再写后端代码
    - 阅读 `设计/前端UI设计.md` § 1、3 后再写前端组件

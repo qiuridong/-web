@@ -268,10 +268,11 @@ def test_manifest_and_asset_contract_pass_backend_validation():
 
     manifest = parse_manifest(MANIFEST_PATH)
     assert manifest.slug == "dmgongheguo"
-    assert str(manifest.version) == "1.2.0"
+    assert str(manifest.version) == "1.2.1"
     assert manifest.default_timeout_sec == 1200
     keys = [field.key for field in manifest.fields]
     assert keys[:2] == ["account", "password"]
+    assert "auto_rebind_account" in keys
     assert "emulator_avd" in keys
     assert "manage_emulator" in keys
     assert "stop_emulator_after_run" in keys
@@ -323,6 +324,69 @@ def test_account_binding_rejects_different_account_or_avd():
             main._expected_binding("first@example.com", "another-avd"),
         )
     assert "first@example.com" not in str(binding)
+
+
+def test_account_change_is_distinct_from_avd_binding_corruption():
+    main = load_main()
+    old_expected = main._expected_binding("first@example.com", "poc34")
+    binding = {**old_expected, "profile_signature": "a" * 64}
+    new_expected = main._expected_binding("second@example.com", "poc34")
+
+    main._validate_binding_container(binding, new_expected)
+    assert main._binding_matches_account(binding, new_expected) is False
+
+    wrong_avd = main._expected_binding("second@example.com", "other-avd")
+    with pytest.raises(main.ScriptError, match="App/AVD"):
+        main._validate_binding_container(binding, wrong_avd)
+
+
+def test_account_rebind_reset_clears_app_data_marker_and_syncs():
+    main = load_main()
+
+    class FakeAdb:
+        def __init__(self):
+            self.calls: list[tuple[str, ...]] = []
+
+        def run(self, *args, **_kwargs):
+            self.calls.append(args)
+            if args[:3] == ("shell", "pm", "clear"):
+                return subprocess.CompletedProcess(args, 0, "Success\n", "")
+            if args[:2] == ("shell", "cat"):
+                return subprocess.CompletedProcess(
+                    args, 1, "", "No such file or directory"
+                )
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+    adb = FakeAdb()
+    main._reset_app_for_account_rebind(adb)
+
+    assert (
+        "shell",
+        "am",
+        "force-stop",
+        main.PACKAGE,
+    ) in adb.calls
+    assert ("shell", "pm", "clear", main.PACKAGE) in adb.calls
+    assert (
+        "shell",
+        "rm",
+        "-f",
+        main.ACCOUNT_BINDING_PATH,
+    ) in adb.calls
+    assert ("shell", "sync") in adb.calls
+
+
+def test_account_rebind_reset_stops_if_pm_clear_fails():
+    main = load_main()
+
+    class FakeAdb:
+        def run(self, *args, **_kwargs):
+            if args[:3] == ("shell", "pm", "clear"):
+                return subprocess.CompletedProcess(args, 1, "Failed\n", "")
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+    with pytest.raises(main.ScriptError, match="清理旧 App 账户数据失败"):
+        main._reset_app_for_account_rebind(FakeAdb())
 
 
 def test_emulator_lifecycle_starts_expected_systemd_unit(monkeypatch):
@@ -443,4 +507,194 @@ def test_logged_in_unbound_avd_fails_and_still_stops(monkeypatch, tmp_path):
     result = main.run({"account": "first@example.com"}, Context())
     assert result.success is False
     assert "没有账户绑定标记" in result.message
+    assert result.data["emulator"]["stopped"] is True
+
+
+def test_changed_panel_account_is_rebound_once_then_checkin_runs(
+    monkeypatch, tmp_path
+):
+    main = load_main()
+
+    class FakeLifecycle:
+        avd_name = "poc34"
+        started_by_run = True
+
+        def __init__(self):
+            self.stopped = False
+
+        def ensure_ready(self):
+            return {}
+
+        def stop(self):
+            self.stopped = True
+
+        def report(self):
+            return {"stopped": self.stopped, "avd_name": self.avd_name}
+
+    class FakeWorker:
+        def __init__(self, *_args):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+    lifecycle = FakeLifecycle()
+    old_expected = main._expected_binding("first@example.com", "poc34")
+    old_binding = {**old_expected, "profile_signature": "a" * 64}
+    screens = iter(
+        [
+            ("my_logged_in", {"confidence": 0.99}, b"old-profile"),
+            ("my_logged_out", {"confidence": 0.98}, b"logged-out"),
+        ]
+    )
+    launches: list[bool] = []
+    resets: list[bool] = []
+    written: list[tuple[dict, str]] = []
+
+    monkeypatch.setattr(
+        main,
+        "ensure_ocr_runtime",
+        lambda *_args: (Path("py"), Path("solver"), Path("assets")),
+    )
+    monkeypatch.setattr(main, "_build_lifecycle", lambda *_args: (lifecycle, 0))
+    monkeypatch.setattr(main, "ExclusiveFileLock", lambda *_args: nullcontext())
+    monkeypatch.setattr(main, "_sigterm_cleanup_guard", nullcontext)
+    monkeypatch.setattr(main, "_check_environment", lambda _adb: {})
+    monkeypatch.setattr(main, "_read_account_binding", lambda _adb: old_binding)
+    monkeypatch.setattr(main, "OcrWorker", FakeWorker)
+    monkeypatch.setattr(main, "_launch_app", lambda _adb: launches.append(True))
+    monkeypatch.setattr(
+        main, "_dismiss_announcements", lambda *_args, **_kwargs: 1
+    )
+    monkeypatch.setattr(main, "_navigate_my", lambda *_args: next(screens))
+    monkeypatch.setattr(
+        main,
+        "_profile_signature",
+        lambda _worker, png: "a" * 64 if png == b"old-profile" else "b" * 64,
+    )
+    monkeypatch.setattr(
+        main,
+        "_reset_app_for_account_rebind",
+        lambda _adb: resets.append(True),
+    )
+    monkeypatch.setattr(
+        main,
+        "_login_with_captcha",
+        lambda *_args: {"logged_in": True, "captcha_submissions": 1},
+    )
+    monkeypatch.setattr(
+        main,
+        "_wait_surface",
+        lambda *_args, **_kwargs: (
+            "my_logged_in",
+            {"confidence": 0.97},
+            b"new-profile",
+        ),
+    )
+
+    def fake_write(_adb, _context, expected, signature):
+        written.append((expected, signature))
+        return {**expected, "profile_signature": signature}
+
+    monkeypatch.setattr(main, "_write_account_binding", fake_write)
+    monkeypatch.setattr(
+        main,
+        "_perform_daily_checkin",
+        lambda *_args: {
+            "checked_in": True,
+            "already_checked_in": True,
+        },
+    )
+
+    @dataclass
+    class Context:
+        run_id: int = 2
+        instance_id: int = 5
+        data_dir: str = str(tmp_path)
+        logger: logging.Logger = field(
+            default_factory=lambda: logging.getLogger("test")
+        )
+
+    result = main.run(
+        {
+            "account": "second@example.com",
+            "password": "new-password",
+            "auto_rebind_account": True,
+        },
+        Context(),
+    )
+
+    assert result.success is True
+    assert result.data["account_rebound"] is True
+    assert result.data["account_binding_verified"] is True
+    assert result.data["already_logged_in"] is False
+    assert result.data["announcements_closed"] == 2
+    assert result.data["emulator"]["stopped"] is True
+    assert len(launches) == 2
+    assert resets == [True]
+    assert written[0][0]["account_sha256"] == main._account_hash(
+        "second@example.com"
+    )
+    assert written[0][1] == "b" * 64
+
+
+def test_changed_account_stays_fail_closed_when_auto_rebind_is_disabled(
+    monkeypatch, tmp_path
+):
+    main = load_main()
+
+    class FakeLifecycle:
+        avd_name = "poc34"
+        started_by_run = True
+
+        def __init__(self):
+            self.stopped = False
+
+        def ensure_ready(self):
+            return {}
+
+        def stop(self):
+            self.stopped = True
+
+        def report(self):
+            return {"stopped": self.stopped, "avd_name": self.avd_name}
+
+    lifecycle = FakeLifecycle()
+    old_expected = main._expected_binding("first@example.com", "poc34")
+    old_binding = {**old_expected, "profile_signature": "a" * 64}
+    monkeypatch.setattr(
+        main,
+        "ensure_ocr_runtime",
+        lambda *_args: (Path("py"), Path("solver"), Path("assets")),
+    )
+    monkeypatch.setattr(main, "_build_lifecycle", lambda *_args: (lifecycle, 0))
+    monkeypatch.setattr(main, "ExclusiveFileLock", lambda *_args: nullcontext())
+    monkeypatch.setattr(main, "_sigterm_cleanup_guard", nullcontext)
+    monkeypatch.setattr(main, "_check_environment", lambda _adb: {})
+    monkeypatch.setattr(main, "_read_account_binding", lambda _adb: old_binding)
+
+    @dataclass
+    class Context:
+        run_id: int = 3
+        instance_id: int = 5
+        data_dir: str = str(tmp_path)
+        logger: logging.Logger = field(
+            default_factory=lambda: logging.getLogger("test")
+        )
+
+    result = main.run(
+        {
+            "account": "second@example.com",
+            "password": "new-password",
+            "auto_rebind_account": False,
+        },
+        Context(),
+    )
+
+    assert result.success is False
+    assert "账号绑定不匹配" in result.message
+    assert result.data["account_rebind_attempted"] is False
     assert result.data["emulator"]["stopped"] is True

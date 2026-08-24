@@ -7,6 +7,8 @@
 - `/run/lock/dmgongheguo-emulator-6554.lock` 保证所有 Android 实例严格串行。
 - 每个账户绑定一个独立 AVD；绑定包含账号哈希和昵称字形签名，不保存账号明文。
 - 每轮签到前复核 AVD 名称、账号绑定和当前昵称字形，身份不一致时停止签到。
+- 单账户替换时可由管家直接下发新账号密码；Agent 验证旧绑定后自动清理旧会话、
+  登录新账号并重建绑定，不需要 SSH、手工清理或新建实例。
 - 启动原版 App，按白色公告几何最多安全关闭 3 个已知公告。
 - 在“我的”页三态识别登录状态；有效会话直接返回成功。
 - 会话失效时自动填写邮箱和密码，获取完整算术验证码行。
@@ -53,10 +55,27 @@ E:\签到脚本多合一\deploy\install-dmgongheguo-emulator.ps1 -SshTarget uk-9
 1. 把实例绑定到安装了官方 Android Emulator 和上述 systemd 模板的节点。
 2. `emulator_avd` 填该账户专属 AVD；当前账户保持 `poc34`。
 3. `manage_emulator` 和 `stop_emulator_after_run` 保持开启。
-4. `adb_path` 保持 `/opt/android-sdk/platform-tools/adb`。
-5. `adb_serial` 保持 `emulator-6554`；所有 AVD 串行复用固定端口。
-6. 必须保存邮箱账号和密码，用于绑定校验及登录态失效后的自动恢复。
-7. 默认 timeout 1200 秒，包含冷启动、验证码刷新和首次 OCR 安装余量。
+4. `auto_rebind_account` 保持开启；以后替换单个账号只需修改账号和密码。
+5. `adb_path` 保持 `/opt/android-sdk/platform-tools/adb`。
+6. `adb_serial` 保持 `emulator-6554`；所有 AVD 串行复用固定端口。
+7. 必须保存邮箱账号和密码，用于绑定校验及登录态失效后的自动恢复。
+8. 默认 timeout 1200 秒，包含冷启动、验证码刷新和首次 OCR 安装余量。
+
+## 单账户自动换绑
+
+当前实例只保留一个长期账户时，在管家编辑实例并同时保存新邮箱和新密码即可。
+下一次运行检测到配置账号哈希变化后会在全局锁内执行：
+
+1. 核对绑定标记确属当前包和当前 AVD；
+2. 若旧账号仍登录，先用昵称字形复核旧会话确实属于原绑定；
+3. `force-stop` App，执行 `pm clear`，删除旧绑定标记并 `sync`；
+4. 重新启动 App，确认进入未登录状态；
+5. 使用管家下发的新凭据完成验证码登录；
+6. 登录成功后才写入新账号哈希和新昵称字形签名；
+7. 继续执行当日幂等签到，最后关闭 Emulator。
+
+`auto_rebind_account=false` 时保留旧的 fail-closed 行为，账号变化只报错，不清理
+旧会话。同一账号只修改密码不会触发清理；新密码会在登录态失效时使用。
 
 ## 多账户串行
 
@@ -65,7 +84,9 @@ E:\签到脚本多合一\deploy\install-dmgongheguo-emulator.ps1 -SshTarget uk-9
 - 计划时间仍应错开 10–15 分钟，锁是碰撞兜底而不是日常排队器。
 - 新 AVD 第一次必须处于未登录状态；脚本用配置凭据成功登录后才写入绑定标记。
 - 已经登录但没有绑定标记的旧 AVD会安全停止，必须人工核实一次后迁移。
-- 修改密码不会改变绑定；修改邮箱会触发绑定不匹配，切换账户时应改用新 AVD。
+- 修改密码不会改变绑定。
+- **替换**当前唯一账户可在原实例、原 AVD 上自动换绑；**同时保留**多个账户时，
+  每个账户仍必须使用独立 AVD 和独立实例。
 
 ## 结果字段
 
@@ -73,6 +94,7 @@ E:\签到脚本多合一\deploy\install-dmgongheguo-emulator.ps1 -SshTarget uk-9
 - `already_logged_in`：本轮开始时会话是否已有效。
 - `already_checked_in`：本轮前是否已经完成今日签到。
 - `account_binding_verified=true`：AVD、配置账号和昵称字形三项均通过复核。
+- `account_rebound=true`：本轮由管家下发的新账号已完成一次性自动换绑。
 - `emulator.started_by_run`：本轮是否执行了冷启动。
 - `emulator.stopped=true`：返回结果前已确认 ADB 设备和 systemd 单元均停止。
 - `checkin_action_enabled=true`：任务页前后置模板验收通过。

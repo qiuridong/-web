@@ -49,7 +49,7 @@
 
 ### 本分支上的其它功能（非货架）
 
-- [x] **📱 动漫共和国 v1.2.0 按需 Emulator** — 2026-08-24 完成 systemd 冷启动/自动关机、全局串行锁和每账户独立 AVD 绑定；生产 run `46` 已闭环成功，当前 Emulator 为 `static/inactive`
+- [x] **📱 动漫共和国 v1.2.1 按需 Emulator + 管家自动换绑** — v1.2.0 已完成 systemd 冷启动/自动关机、全局锁和身份绑定，run `46` 真实闭环；2026-08-25 增加单账户只改面板账号密码即可自动清旧会话并重建绑定
 
 ---
 
@@ -84,11 +84,15 @@
 | 2026-06-02 | `bash -n install/migrate` + `migrate export` 产物含 hub.sqlite3+scripts | ✅ |
 | 2026-08-24 | 动漫共和国 v1.2.0 本地测试 / Ruff / 四份脚本目录一致性 | ✅ `35 passed` / All checks passed / 4×37 文件摘要一致 |
 | 2026-08-24 | 生产 run `46`：关机态冷启动 `poc34` → 身份绑定复核 → 今日已签到 → 自动关机 | ✅ `success` / `account_binding_verified=true` / `stopped=true` |
+| 2026-08-25 | 动漫共和国 v1.2.1 自动换绑状态机 / Ruff / 双端 sandbox / 四份目录一致性 | ✅ `40 passed` / All checks passed / 两端 dry-run success / 4×37 文件摘要一致 |
+| 2026-08-25 | v1.2.1 主面板扫描 + UK Agent 同步 | ✅ `updated=1 errors=0` / bundle `2b550096…` / 实例原账号与 Emulator 均未改动 |
 | — | install/migrate VPS 实测 | ⏳ M4 |
 
 ---
 
 ## 最近迭代（倒序）
+
+- 2026-08-25（✅ **动漫共和国 v1.2.1 管家下发自动换绑已部署**）用户指出情况 A 还要人工暂停、SSH 清理和换绑过于麻烦，因此把“修改面板账号”本身升级为一次性换绑信号：实例配置账号哈希与 `poc34` 旧绑定不同时，Agent 先验证绑定确属当前 App/AVD；旧账号仍登录则再核对昵称字形；确认新密码存在后执行 `force-stop → pm clear → rm marker → sync`，重新启动并确认未登录，再用管家下发的新凭据走验证码登录，只有真实登录成功才写新哈希/昵称绑定，然后幂等签到并关机。结果新增 `account_rebound=true`，失败清理后记录 `account_rebind_attempted=true`；`auto_rebind_account=false` 可恢复只报错模式。**情况 A 现在只需编辑原 instance `5`，无需新实例/新 AVD；情况 B 两账户共存仍是一账户一 AVD 一实例。**测试 `40 passed`、Ruff、本地/UK dry-run 全绿；主面板 v1.2.1 扫描 `updated=1 errors=0`，Agent bundle `2b550096…`，四份 37 文件摘要 `fde80afe…` 一致。没有为了部署触发真实签到或清除当前会话；真实换绑等用户填写新凭据。详见 [变更/2026-08-25-动漫共和国管家下发自动换绑.md](../变更/2026-08-25-动漫共和国管家下发自动换绑.md)。
 
 - 2026-08-24（✅ **动漫共和国 v1.2.0 按需 Emulator 已上线并真实闭环**）将原先常驻、约占 2.83 GiB RSS 的 `poc34` 改为任务生命周期托管：静态 systemd 模板固定端口 `6554`，Python 获取 `/run/lock/dmgongheguo-emulator-6554.lock` 后启动，等待 ADB + `sys.boot_completed=1` 并核对真实 AVD，成功/失败/SIGTERM 均在 `finally` 先 `sync` 再关机。每个账户必须使用独立持久化 AVD；标记只保存账号哈希与昵称字形签名，AVD/配置账号/当前登录身份任何一项不符都在签到前停止。用户看到的 run `43`～`45` 是上线验收，分别发现绑定落盘、迁移哈希和 App 超 100 秒冷启动问题，三次均未进入签到点击且都自动关机；修复后 run `46` 从无 ADB/QEMU 状态开始，32.796 秒冷启动，确认已登录/今日已签到/绑定通过，1.468 秒关机，总耗时 86.969 秒。结束后 unit `inactive/dead`、ADB 空、QEMU 空、available RAM 3.4 GiB。下一次 scheduled run 为 2026-08-25 08:20。详见 [变更/2026-08-24-动漫共和国验证码登录与VPS签到自动化.md](../变更/2026-08-24-动漫共和国验证码登录与VPS签到自动化.md)。
 

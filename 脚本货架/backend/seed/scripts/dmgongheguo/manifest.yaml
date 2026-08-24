@@ -12,8 +12,9 @@ description: |
 
   Android Emulator 由 systemd 按需启动，所有实例共享全局串行锁；任务成功、
   失败或收到 SIGTERM 都会优雅关机。每个账户绑定独立 AVD，并以昵称字形签名
-  复核登录身份，避免修改面板账号后继续误签旧会话。
-version: 1.2.0
+  复核登录身份。替换单账户时只需在管家修改账号密码，Agent 会受控清理旧会话、
+  自动登录新账号并重建绑定；同时保留多个账户时仍需每账户独立 AVD。
+version: 1.2.1
 author: yunkelai
 
 default_cron: "20 8 * * *"
@@ -33,6 +34,12 @@ fields:
     type: secret
     required: true
     description: 登录态失效时使用；当前安全输入器支持字母、数字以及 @ . -。
+
+  - key: auto_rebind_account
+    label: 账号变化时自动换绑
+    type: boolean
+    default: true
+    description: 单账户替换时保持开启；检测到邮箱变化后由 Agent 清除旧 App 会话，自动登录并绑定新账号。关闭时账号不匹配会安全停止。
 
   - key: emulator_avd
     label: 专属 Emulator AVD

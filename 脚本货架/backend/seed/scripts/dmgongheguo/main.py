@@ -1,6 +1,6 @@
 """动漫共和国每日签到：ADB + 登录保活 + 本地验证码识别。
 
-1.2.0 增加 Emulator 按需启停、跨实例串行锁、AVD 绑定和昵称字形复核。
+1.2.1 支持管家下发新账号后在同一 AVD 内受控清理旧会话并自动换绑。
 验证码识别器只提交高置信乘法题，加/减/除法和不完整 token 链全部刷新。
 """
 
@@ -121,15 +121,80 @@ def _read_account_binding(adb: AdbClient) -> dict[str, Any] | None:
 def _validate_account_binding(
     binding: dict[str, Any], expected: dict[str, Any]
 ) -> None:
-    for key, value in expected.items():
+    _validate_binding_container(binding, expected)
+    if binding.get("account_sha256") != expected.get("account_sha256"):
+        raise ScriptError(
+            "Emulator 与当前实例的账号绑定不匹配；"
+            "请开启账号变化自动换绑，或恢复原账号配置"
+        )
+
+
+def _validate_binding_container(
+    binding: dict[str, Any], expected: dict[str, Any]
+) -> None:
+    """先验证绑定确属当前包和 AVD，再决定是否允许账号换绑。"""
+
+    for key in ("schema", "package", "avd_name"):
+        value = expected[key]
         if binding.get(key) != value:
             raise ScriptError(
-                "Emulator 与当前实例的 AVD/账号绑定不匹配；"
-                "切换账户必须使用独立 AVD"
+                "Emulator 账户绑定不匹配：当前 App/AVD 与标记不一致；"
+                "已停止自动换绑和签到"
             )
+    account_hash = str(binding.get("account_sha256") or "")
+    if re.fullmatch(r"[0-9a-f]{64}", account_hash) is None:
+        raise ScriptError("Emulator 账户绑定缺少有效的账号哈希")
     signature = str(binding.get("profile_signature") or "")
     if re.fullmatch(r"[0-9a-f]{64}", signature) is None:
         raise ScriptError("Emulator 账户绑定缺少有效的昵称字形签名")
+
+
+def _binding_matches_account(
+    binding: dict[str, Any], expected: dict[str, Any]
+) -> bool:
+    return binding.get("account_sha256") == expected.get("account_sha256")
+
+
+def _require_login_password(config: dict[str, Any]) -> str:
+    password = str(config.get("password") or "")
+    if not password:
+        raise ScriptError("自动登录或账号换绑需要在实例中配置登录密码")
+    return password
+
+
+def _reset_app_for_account_rebind(adb: AdbClient) -> None:
+    """在已验证的 AVD 内清除旧 App 会话和旧绑定，不触碰 APK/AVD。"""
+
+    adb.run(
+        "shell",
+        "am",
+        "force-stop",
+        PACKAGE,
+        timeout=15,
+        sensitive=True,
+    )
+    cleared = adb.run(
+        "shell",
+        "pm",
+        "clear",
+        PACKAGE,
+        timeout=45,
+        check=False,
+        sensitive=True,
+    )
+    if cleared.returncode != 0 or "success" not in cleared.stdout.lower():
+        raise ScriptError("清理旧 App 账户数据失败，已停止自动换绑")
+    adb.run(
+        "shell",
+        "rm",
+        "-f",
+        ACCOUNT_BINDING_PATH,
+        timeout=10,
+        sensitive=True,
+    )
+    adb.run("shell", "sync", timeout=20, sensitive=True)
+    if _read_account_binding(adb) is not None:
+        raise ScriptError("清理后旧账户绑定标记仍然存在，已停止自动换绑")
 
 
 def _profile_signature(worker: OcrWorker, png: bytes) -> str:
@@ -737,9 +802,7 @@ def _login_with_captcha(
     logger: logging.Logger,
 ) -> dict[str, Any]:
     account = _normalized_account(config)
-    password = str(config.get("password") or "")
-    if not password:
-        raise ScriptError("登录态已失效，请在实例中配置登录密码")
+    password = _require_login_password(config)
 
     min_confidence = _bounded_float(config, "captcha_min_confidence", 0.72, 0.5, 0.99)
     max_images = _bounded_int(config, "captcha_max_images", 18, 4, 30)
@@ -933,6 +996,7 @@ def run(config: dict[str, Any], context: Any) -> RunResult:
     serial = str(config.get("adb_serial") or LOCKED_SERIAL)
     adb = AdbClient(adb_path, serial, logger)
     lifecycle: EmulatorLifecycle | None = None
+    account_rebind_attempted = False
 
     try:
         account = _normalized_account(config)
@@ -949,8 +1013,16 @@ def run(config: dict[str, Any], context: Any) -> RunResult:
                 environment = _check_environment(adb)
                 expected_binding = _expected_binding(account, lifecycle.avd_name)
                 binding = _read_account_binding(adb)
+                rebind_required = False
                 if binding is not None:
-                    _validate_account_binding(binding, expected_binding)
+                    _validate_binding_container(binding, expected_binding)
+                    rebind_required = not _binding_matches_account(
+                        binding, expected_binding
+                    )
+                    if rebind_required:
+                        if not bool(config.get("auto_rebind_account", True)):
+                            _validate_account_binding(binding, expected_binding)
+                        _require_login_password(config)
 
                 with OcrWorker(python, solver, assets) as worker:
                     _launch_app(adb)
@@ -961,8 +1033,32 @@ def run(config: dict[str, Any], context: Any) -> RunResult:
                         adb, worker, timeout=app_ready_timeout
                     )
                     surface, login_evidence, my_png = _navigate_my(adb, worker)
+                    if rebind_required:
+                        if surface == "my_logged_in":
+                            old_signature = _profile_signature(worker, my_png)
+                            _verify_profile_signature(binding, old_signature)
+                        logger.warning(
+                            "检测到管家下发的账号发生变化；"
+                            "正在清理旧 App 会话并执行一次性自动换绑"
+                        )
+                        account_rebind_attempted = True
+                        _reset_app_for_account_rebind(adb)
+                        binding = None
+                        _launch_app(adb)
+                        closed += _dismiss_announcements(
+                            adb, worker, timeout=app_ready_timeout
+                        )
+                        surface, login_evidence, my_png = _navigate_my(
+                            adb, worker
+                        )
+                        if surface != "my_logged_out":
+                            raise ScriptError(
+                                "清理旧账户后 App 仍不是未登录状态，已停止换绑"
+                            )
+
                     already_logged_in = surface == "my_logged_in"
                     login_result: dict[str, Any] = {}
+                    account_rebound = False
                     if already_logged_in:
                         if binding is None:
                             raise ScriptError(
@@ -990,6 +1086,9 @@ def run(config: dict[str, Any], context: Any) -> RunResult:
                                 signature,
                             )
                             logger.info("已建立 AVD、账号与昵称字形三重绑定")
+                            if rebind_required:
+                                account_rebound = True
+                                logger.info("管家下发的新账号已完成自动换绑")
                         else:
                             _verify_profile_signature(binding, signature)
 
@@ -1010,6 +1109,7 @@ def run(config: dict[str, Any], context: Any) -> RunResult:
                             "announcements_closed": closed,
                             "environment": environment,
                             "account_binding_verified": True,
+                            "account_rebound": account_rebound,
                             "checkin_action_enabled": True,
                             **login_result,
                             **checkin_result,
@@ -1027,6 +1127,7 @@ def run(config: dict[str, Any], context: Any) -> RunResult:
         data: dict[str, Any] = {
             "action": "daily_checkin",
             "error_class": type(exc).__name__,
+            "account_rebind_attempted": account_rebind_attempted,
         }
         if lifecycle is not None:
             data["emulator"] = lifecycle.report()
@@ -1037,7 +1138,11 @@ def run(config: dict[str, Any], context: Any) -> RunResult:
         )
     except Exception as exc:  # 平台边界：未知异常仍返回结构化 failure
         logger.exception("动漫共和国登录保活出现未预期异常")
-        data = {"action": "daily_checkin", "error_class": type(exc).__name__}
+        data = {
+            "action": "daily_checkin",
+            "error_class": type(exc).__name__,
+            "account_rebind_attempted": account_rebind_attempted,
+        }
         if lifecycle is not None:
             data["emulator"] = lifecycle.report()
         return RunResult(
