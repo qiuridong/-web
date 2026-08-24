@@ -1,0 +1,30 @@
+[Unit]
+Description=动漫共和国按需 Android Emulator (%i)
+Documentation=file:/opt/signin-agent/scripts/dmgongheguo/README.md
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/dev/kvm
+ConditionFileIsExecutable=/opt/android-sdk/emulator/emulator
+ConditionFileIsExecutable=/opt/android-sdk/platform-tools/adb
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root
+Environment=HOME=/root
+Environment=ANDROID_HOME=/opt/android-sdk
+Environment=ANDROID_SDK_ROOT=/opt/android-sdk
+ExecStart=/opt/android-sdk/emulator/emulator -avd %i -no-window -gpu swiftshader -no-audio -no-boot-anim -no-snapshot -no-metrics -port 6554 -cores 2
+ExecStop=-/opt/android-sdk/platform-tools/adb -s emulator-6554 shell sync
+ExecStop=-/opt/android-sdk/platform-tools/adb -s emulator-6554 emu kill
+Restart=no
+RuntimeMaxSec=22min
+TimeoutStopSec=45s
+KillMode=mixed
+SendSIGKILL=yes
+Nice=5
+OOMScoreAdjust=250
+SyslogIdentifier=dmgongheguo-emulator-%i
+
+[Install]
+# 本服务只能由签到任务按需启动，不允许 enable 为开机常驻。

@@ -35,6 +35,8 @@ from PIL import Image, UnidentifiedImageError
 SCREEN_SIZE = (720, 1280)
 CAPTCHA_ROI = (230, 535, 690, 685)
 FORMULA_IN_CAPTCHA = (60, 20, 430, 120)
+PROFILE_IDENTITY_ROI = (150, 140, 540, 200)
+PROFILE_SIGNATURE_SIZE = (192, 48)
 
 # token 总数 = 左操作数位数 + 运算符 + 右操作数位数 + '=' + '?'
 GRAMMARS: tuple[tuple[str, int, int], ...] = (
@@ -284,6 +286,52 @@ def inspect_ui(frame: np.ndarray, assets_dir: Path) -> dict[str, Any]:
             }
 
     return {"surface": "unknown", "confidence": 0.0}
+
+
+def inspect_profile_identity(frame: np.ndarray) -> dict[str, Any]:
+    """提取“我的”页昵称字形签名，不返回昵称文字或原始截图。"""
+
+    height, width = frame.shape[:2]
+    if (width, height) != SCREEN_SIZE:
+        raise SolverError(
+            f"profile inspection requires 720x1280, got {width}x{height}"
+        )
+    x1, y1, x2, y2 = PROFILE_IDENTITY_ROI
+    roi = frame[y1:y2, x1:x2]
+    mask = (
+        (roi[:, :, 0] > 190)
+        & (roi[:, :, 1] > 190)
+        & (roi[:, :, 2] > 190)
+    ).astype(np.uint8)
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(mask, 8)
+    kept = np.zeros_like(mask)
+    for component in range(1, count):
+        _, _, _, component_height, area = (
+            int(value) for value in stats[component]
+        )
+        if area >= 3 and component_height >= 3:
+            kept[labels == component] = 1
+    ys, xs = np.where(kept)
+    if len(xs) < 25:
+        raise SolverError("profile identity region has insufficient foreground")
+    cropped = kept[ys.min() : ys.max() + 1, xs.min() : xs.max() + 1]
+    normalized = cv2.resize(
+        cropped,
+        PROFILE_SIGNATURE_SIZE,
+        interpolation=cv2.INTER_NEAREST,
+    )
+    signature = hashlib.sha256(np.packbits(normalized).tobytes()).hexdigest()
+    return {
+        "profile_signature": signature,
+        "ink_pixels": int(kept.sum()),
+        "bounding_box": [
+            int(xs.min()),
+            int(ys.min()),
+            int(xs.max()),
+            int(ys.max()),
+        ],
+        "policy": "nickname_glyph_sha256_v1",
+    }
 
 
 def _pad_square(image: np.ndarray, padding: int = 20) -> Image.Image:
@@ -675,6 +723,8 @@ def _handle_request(
     if mode == "fingerprint":
         formula = _formula_area(_captcha_crop(frame))
         return {"formula_fingerprint": _fingerprint(formula)}
+    if mode == "profile":
+        return inspect_profile_identity(frame)
     raise SolverError(f"unsupported mode: {mode!r}")
 
 

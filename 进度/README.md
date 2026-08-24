@@ -51,7 +51,7 @@ docker compose logs -f backend      # 看日志
 
 ## 当前状态
 
-**2026-08-24 · ✅ 动漫共和国验证码登录 + Android 每日签到已接入 UK VPS 和生产面板** — 已新增 `dmgongheguo` v1.1.0：本地 `ddddocr` + 字形模板只提交高置信乘法题，其余题型/歧义图片自动刷新且提交前复核像素指纹；真实一次性 Android 用户已完成“未登录 → 自动过验证码 → 登录成功”，证明**当前能够自动登录且不需要 root**。任务中心按待签到/成功弹窗/已签到三态幂等执行，真实首次签到成功；生产已注册 `uk-9950x-android`（node `4`）和 `DMG Daily Check-in`（instance `5`），run `40`、`41` 和最终字节同步验收 run `42` 均成功，下一次为 2026-08-25 08:20（Asia/Shanghai）。本地 `30 passed`、ruff 全绿、36 文件主/seed 逐字节一致；账号密码只存在 Fernet 加密实例中。详见 [变更/2026-08-24-动漫共和国验证码登录与VPS签到自动化.md](变更/2026-08-24-动漫共和国验证码登录与VPS签到自动化.md)。
+**2026-08-24 · ✅ 动漫共和国验证码登录、按需 Emulator 与每日签到已接入 UK VPS 和生产面板** — `dmgongheguo` 已升级到 v1.2.0：在保留高置信验证码自动登录和三态幂等签到的基础上，新增 systemd 任务前冷启动/`finally` 自动关机、固定端口全局串行锁、每账户独立 AVD 绑定与昵称字形复核。生产 run `46` 从 ADB/QEMU 完全关闭状态启动 `poc34`，`32796 ms` 就绪，确认 `already_logged_in=true`、`already_checked_in=true` 和 `account_binding_verified=true`，随后 `1468 ms` 关机；当前 unit 为 `static/inactive`、ADB 无设备、QEMU 无进程，空闲 available RAM `3.4 GiB`。用户看到的 run `43`～`45` 是上线验收，均在签到点击前安全失败并自动关机，没有重复签到；对应的同步落盘、绑定迁移和 App 冷启动等待问题均已修复。下一次 scheduled run 为 2026-08-25 08:20（Asia/Shanghai）。本地 `35 passed`、ruff 全绿，主脚本/seed/主面板/Agent 四份各 37 文件一致；账号密码只存在 Fernet 加密实例中。详见 [变更/2026-08-24-动漫共和国验证码登录与VPS签到自动化.md](变更/2026-08-24-动漫共和国验证码登录与VPS签到自动化.md)。
 
 **2026-07-02 · 📱 jb 移动端适配收尾上线(NodeList 卡片响应式)** — 承 2026-07-01 的 P0(详情页 Tabs 横滑,根改 `ui/tabs.tsx`)+ P1(6 处多列网格移动优先)已上线,本次补上**唯一遗漏的 `NodeList.tsx`**——节点卡片头部 `flex items-start justify-between` → `flex flex-col gap-3 sm:flex-row sm:...`(手机竖排,sm+ 横向)+ 清理残留空行。本地 `pnpm build`(改动未提交故走本地构建+scp,本场景合理例外)→ 新 hash **`index-DwMZPnzz.js`**(旧 `index-BCbZxWNX.js`)→ 服务器 `dist.staging` 校验(hash+NodeList 类+P0 CSS 回归)→ 原子切换(备份 `dist.backup.20260702-105132`)→ 公网 200 + 新 hash 生效 + 旧 hash 归 0。7 个 `.tsx`(6 P1 + tabs + NodeList)+ 进度文档待提交(用户授权)。仅前端,后端未 rebuild。**续**:随后修 README tab **内容截断**(上批 `overflow-hidden` 静默裁切宽表格)——去 `overflow-hidden` + 给表格加 `overflow-x-auto` 横滚容器(GitHub 式),再部署 **`index-C6Iy98FG.js`**(备份 `dist.backup.20260702-113300`)。共 7 个 `.tsx`(其中 `ScriptDetail.tsx` 含 P1 网格 + README 修复两处)+ 进度文档本会话提交。**待**:360px 真机点验(tab 可滑到 README + 节点卡片竖排 + README 宽表格可横滑)。详见 [变更/2026-07-01-jb移动端适配修复.md](变更/2026-07-01-jb移动端适配修复.md) 末尾「续」段。
 
@@ -351,9 +351,9 @@ docker compose logs -f backend      # 看日志
 
 > 30 秒读完,你就能继续干活。
 
-1. **现在卡在哪**(2026-05-30):项目早已过 MVP-5 + 远程 agent + 外观完整版,生产 `jb.aijiaxia.cc` 在跑。当前在前端分支 `feat/ui-fullbg-mobile-runcancel` 做体验改进:**壁纸整屏统一 + 手机端右侧白块**(本会话)/ **运行取消 + 删除脚本**(另一会话)。⚠️ **两会话共享同一工作树**,`AppLayout.tsx` 有未提交 WIP(壁纸统一雏形,+41/−31)。最新真实状态看本文件顶部「当前状态」+ [分支/feat-ui-fullbg-mobile-runcancel.md](分支/feat-ui-fullbg-mobile-runcancel.md)。
-2. **上一步做了什么**(2026-05-27 凌晨):PR #6/#9 解 main 冲突全 MERGEABLE → 用户随后 merge PR #9/#10 进 main(`9bfaaa9`)。PR #6(删脚本)/ PR #7(手机)仍 OPEN(#7 代码已随 #8 super-PR 进 main)。
-3. **下一步要做什么**:(a) 确认「壁纸/手机 vs 取消/删除」两会话边界,接管或细化 `AppLayout.tsx` WIP;(b) `pnpm build` + Claude Preview 本机验证壁纸铺满整屏 + 手机端无白块;(c) 部署:scp `frontend/dist` 到 `154.9.238.144:/opt/signin-panel/`(动后端才需 `docker compose build backend`);(d) 留意 JM 机器重启后的 pending run。
+1. **现在卡在哪**(2026-08-24):在分支 `feat/script-hub`。**动漫共和国 v1.2.0 已完成开发、部署和真实按需启停闭环**；run `46` 成功，当前 UK Emulator 为 `static/inactive`，等待 2026-08-25 08:20 第一次 scheduled run 自然观察。工作树同时保留实例接力、JM、前端等其它会话的未提交改动，处理时必须继续隔离文件所有权。
+2. **上一步做了什么**(2026-08-24):新增 `helpers/emulator_lifecycle.py`、systemd 模板与安装器，主脚本加入全局串行锁、AVD/账号/昵称三重绑定、冷启动安全等待和异常自动关机；本地 `35 passed`、Ruff 全绿、四份 37 文件一致，生产 run `46` 从关机态完成“启动→已签到复核→关机”。详细证据见 2026-08-24 动漫共和国变更档。
+3. **下一步要做什么**:(a) 只观察下一次 scheduled run，不为测试重复触发签到；(b) 若新增账号，先创建独立持久化 AVD，再建实例并错开 10–15 分钟，禁止共用 `poc34`；(c) 实例接力仍是 opt-in，待用户在面板勾开关并做真机故障转移验收。
 4. **重要约束**(违反就回炉):
    - 阅读 `设计/后端架构.md` § 3、4、5 后再写后端代码
    - 阅读 `设计/前端UI设计.md` § 1、3 后再写前端组件

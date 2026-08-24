@@ -9,7 +9,11 @@ description: |
 
   任务中心同时使用“待签到”“签到成功弹窗”“已签到”三态模板；只有待签到
   前置模板通过才点击一次，已签到会直接返回成功，不重复触发每日唯一动作。
-version: 1.1.0
+
+  Android Emulator 由 systemd 按需启动，所有实例共享全局串行锁；任务成功、
+  失败或收到 SIGTERM 都会优雅关机。每个账户绑定独立 AVD，并以昵称字形签名
+  复核登录身份，避免修改面板账号后继续误签旧会话。
+version: 1.2.0
 author: yunkelai
 
 default_cron: "20 8 * * *"
@@ -20,15 +24,65 @@ fields:
   - key: account
     label: 邮箱账号
     type: string
-    required: false
-    description: 登录态失效时使用；实例配置整体由面板 Fernet 加密存储。
+    required: true
+    description: 用于登录恢复及 AVD 账户绑定；实例配置整体由面板 Fernet 加密存储。
     placeholder: "you@example.com"
 
   - key: password
     label: 登录密码
     type: secret
-    required: false
+    required: true
     description: 登录态失效时使用；当前安全输入器支持字母、数字以及 @ . -。
+
+  - key: emulator_avd
+    label: 专属 Emulator AVD
+    type: string
+    required: true
+    default: "poc34"
+    pattern: "^[A-Za-z0-9._-]{1,64}$"
+    description: 一个账户绑定一个独立 AVD；多个账户可以串行复用端口 6554，但不能共用 AVD。
+
+  - key: manage_emulator
+    label: 按需管理 Emulator
+    type: boolean
+    default: true
+    description: 任务前通过 systemd 启动指定 AVD；生产环境应保持开启。
+
+  - key: stop_emulator_after_run
+    label: 任务后关闭 Emulator
+    type: boolean
+    default: true
+    description: 成功、失败或中断后都关闭 Emulator，释放约 2.8 GiB 内存。
+
+  - key: emulator_start_timeout_sec
+    label: Emulator 启动超时（秒）
+    type: integer
+    default: 300
+    min: 60
+    max: 600
+
+  - key: emulator_shutdown_timeout_sec
+    label: Emulator 关闭超时（秒）
+    type: integer
+    default: 60
+    min: 10
+    max: 120
+
+  - key: emulator_lock_timeout_sec
+    label: 串行锁等待上限（秒）
+    type: integer
+    default: 600
+    min: 0
+    max: 900
+    description: 多个 Android 实例碰撞时排队等待；仍建议把计划时间错开 10–15 分钟。
+
+  - key: app_ready_timeout_sec
+    label: App 冷启动等待上限（秒）
+    type: integer
+    default: 240
+    min: 120
+    max: 480
+    description: arm64 App 在 x86 转译环境冷启动较慢；只延长等待，不会盲点未知界面。
 
   - key: adb_path
     label: ADB 路径

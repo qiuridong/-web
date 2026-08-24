@@ -3,6 +3,10 @@
 ## 当前能力
 
 - 固定环境合同：`emulator-6554`、720×1280@320、API 34、App 1.0.0.7。
+- 通过 `dmgongheguo-emulator@.service` 在任务前按需启动 AVD，任务结束后关闭。
+- `/run/lock/dmgongheguo-emulator-6554.lock` 保证所有 Android 实例严格串行。
+- 每个账户绑定一个独立 AVD；绑定包含账号哈希和昵称字形签名，不保存账号明文。
+- 每轮签到前复核 AVD 名称、账号绑定和当前昵称字形，身份不一致时停止签到。
 - 启动原版 App，按白色公告几何最多安全关闭 3 个已知公告。
 - 在“我的”页三态识别登录状态；有效会话直接返回成功。
 - 会话失效时自动填写邮箱和密码，获取完整算术验证码行。
@@ -12,7 +16,7 @@
 - 真正提交最多 2 次，刷新次数和提交次数分别记录。
 - 登录有效后进入任务中心；仅在“待签到”模板通过时点击一次签到。
 - 已签到模板直接幂等成功；新签到必须经过成功弹窗/已签到后置模板复核。
-- 账号、密码、全屏截图和验证码原图不写日志、不写仓库、不落盘。
+- 账号、密码、全屏截图和验证码原图不写日志、不写仓库、不落盘；绑定标记只含不可逆哈希。
 
 ## 为什么只自动提交乘法
 
@@ -34,17 +38,41 @@ UK 节点已有 `/root/.local/bin/uv`。首次执行会在实例专属 data_dir 
 `.ocr-venv`，由 uv 安装 Python 3.12、ddddocr、onnxruntime、OpenCV 和 Pillow；
 后续复用，不修改系统 Python 3.14。
 
+节点还必须安装仓库中的 systemd 模板，但不能将它设为开机启动：
+
+```powershell
+E:\签到脚本多合一\deploy\install-dmgongheguo-emulator.ps1 -SshTarget uk-9950x
+```
+
+模板的 `RuntimeMaxSec=22min` 是异常兜底。正常流程会在 Python `finally` 中立即
+执行 `systemctl stop`；即使 Agent 超时发送 SIGTERM，也会先展开清理逻辑。若
+进程遭遇不可捕获的 SIGKILL，systemd 最迟仍会在运行上限到达时回收 QEMU。
+
 ## 面板配置
 
-1. 把实例绑定到实际运行官方 Android Emulator 的 UK 节点。
-2. `adb_path` 保持 `/opt/android-sdk/platform-tools/adb`。
-3. `adb_serial` 保持 `emulator-6554`。
-4. 当前 VPS 会话已经登录，账号和密码可先留空；会话失效前补齐即可。
-5. 默认 timeout 1200 秒，包含首次 OCR 环境安装余量。
+1. 把实例绑定到安装了官方 Android Emulator 和上述 systemd 模板的节点。
+2. `emulator_avd` 填该账户专属 AVD；当前账户保持 `poc34`。
+3. `manage_emulator` 和 `stop_emulator_after_run` 保持开启。
+4. `adb_path` 保持 `/opt/android-sdk/platform-tools/adb`。
+5. `adb_serial` 保持 `emulator-6554`；所有 AVD 串行复用固定端口。
+6. 必须保存邮箱账号和密码，用于绑定校验及登录态失效后的自动恢复。
+7. 默认 timeout 1200 秒，包含冷启动、验证码刷新和首次 OCR 安装余量。
+
+## 多账户串行
+
+- 每个账户创建独立、持久化的 AVD，不要让不同账户共用同一份 userdata。
+- 多个实例可以都使用 `emulator-6554`，因为全局锁保证同一时刻只有一个 AVD。
+- 计划时间仍应错开 10–15 分钟，锁是碰撞兜底而不是日常排队器。
+- 新 AVD 第一次必须处于未登录状态；脚本用配置凭据成功登录后才写入绑定标记。
+- 已经登录但没有绑定标记的旧 AVD会安全停止，必须人工核实一次后迁移。
+- 修改密码不会改变绑定；修改邮箱会触发绑定不匹配，切换账户时应改用新 AVD。
 
 ## 结果字段
 
 - `action=daily_checkin`
 - `already_logged_in`：本轮开始时会话是否已有效。
 - `already_checked_in`：本轮前是否已经完成今日签到。
-- `checkin_action_enabled=true`：1.1.0 已完成任务页前后置模板验收。
+- `account_binding_verified=true`：AVD、配置账号和昵称字形三项均通过复核。
+- `emulator.started_by_run`：本轮是否执行了冷启动。
+- `emulator.stopped=true`：返回结果前已确认 ADB 设备和 systemd 单元均停止。
+- `checkin_action_enabled=true`：任务页前后置模板验收通过。

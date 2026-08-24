@@ -47,6 +47,10 @@
 - [x] **M4 部署上线** — 2026-06-02 上线 `https://hub.aijiaxia.cc`（LE 证书 + host nginx vhost + 响应式 dist，HTTPS smoke 全绿）
 - [ ] 进度 README 索引登记
 
+### 本分支上的其它功能（非货架）
+
+- [x] **📱 动漫共和国 v1.2.0 按需 Emulator** — 2026-08-24 完成 systemd 冷启动/自动关机、全局串行锁和每账户独立 AVD 绑定；生产 run `46` 已闭环成功，当前 Emulator 为 `static/inactive`
+
 ---
 
 ## 关键改动（按主题）
@@ -78,11 +82,15 @@
 | 2026-06-02 | Preview 闭环：画廊 3 卡片 / 详情（头部+三按钮+字段表）/ setup 登录 / 登录后写操作出现 / 0 console 错误 | ✅ |
 | 2026-06-02 | 「导入到管家」href = `jb.aijiaxia.cc/scripts?import=<encoded bundle>` + target=_blank | ✅ |
 | 2026-06-02 | `bash -n install/migrate` + `migrate export` 产物含 hub.sqlite3+scripts | ✅ |
+| 2026-08-24 | 动漫共和国 v1.2.0 本地测试 / Ruff / 四份脚本目录一致性 | ✅ `35 passed` / All checks passed / 4×37 文件摘要一致 |
+| 2026-08-24 | 生产 run `46`：关机态冷启动 `poc34` → 身份绑定复核 → 今日已签到 → 自动关机 | ✅ `success` / `account_binding_verified=true` / `stopped=true` |
 | — | install/migrate VPS 实测 | ⏳ M4 |
 
 ---
 
 ## 最近迭代（倒序）
+
+- 2026-08-24（✅ **动漫共和国 v1.2.0 按需 Emulator 已上线并真实闭环**）将原先常驻、约占 2.83 GiB RSS 的 `poc34` 改为任务生命周期托管：静态 systemd 模板固定端口 `6554`，Python 获取 `/run/lock/dmgongheguo-emulator-6554.lock` 后启动，等待 ADB + `sys.boot_completed=1` 并核对真实 AVD，成功/失败/SIGTERM 均在 `finally` 先 `sync` 再关机。每个账户必须使用独立持久化 AVD；标记只保存账号哈希与昵称字形签名，AVD/配置账号/当前登录身份任何一项不符都在签到前停止。用户看到的 run `43`～`45` 是上线验收，分别发现绑定落盘、迁移哈希和 App 超 100 秒冷启动问题，三次均未进入签到点击且都自动关机；修复后 run `46` 从无 ADB/QEMU 状态开始，32.796 秒冷启动，确认已登录/今日已签到/绑定通过，1.468 秒关机，总耗时 86.969 秒。结束后 unit `inactive/dead`、ADB 空、QEMU 空、available RAM 3.4 GiB。下一次 scheduled run 为 2026-08-25 08:20。详见 [变更/2026-08-24-动漫共和国验证码登录与VPS签到自动化.md](../变更/2026-08-24-动漫共和国验证码登录与VPS签到自动化.md)。
 
 - 2026-07-03（📱 **README 改整段横滑上线** ✅）承移动端适配:用户觉得 README「表格/代码块各自局部横滑」别扭，改为**整段 README 单一横向滚动区**——`overflow-x-auto` 从每个 `table`/`pre` 包裹 div 上移到承载全部 markdown 的 `<article>`，删掉 per-block 包裹 div，`table`/`pre` 保留 `min-w-max`（超宽时撑出 article 触发整段横滑，不撑破页面；窄段落仍按视口换行）。测试同步（`ScriptDetail.test.tsx` 断言唯一滚动区=article）。本地 `pnpm build`（11.76s）→ 新 hash **`index-DOlPP0Ln.js`**/`index-r0TqrD3z.css`（旧 `index-D6snjLIL.js`）→ scp `dist.staging` 自洽校验 → 原子切换（备份 `dist.backup.20260703-023933`）→ 公网 `jb.aijiaxia.cc` 200 + 新 hash 生效 + 旧 hash 引用归 0。仅前端 dist。**待**:真机复核整段横滑手感。详见 [变更/2026-07-01-jb移动端适配修复.md](../变更/2026-07-01-jb移动端适配修复.md) 末尾「续 4」段。
 - 2026-07-02（📱 **jb 移动端适配收尾上线** ✅）承 2026-07-01(P0 Tabs 横滑根改 `ui/tabs.tsx` + P1 6 处网格移动优先，均已上线)，补上**唯一遗漏的 `NodeList.tsx`**——节点卡片头部 `flex items-start justify-between gap-3` → `flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between`(手机竖排，sm+ 横向) + 删上会话残留空行。本地 `pnpm build`(改动未提交、服务器无法 git 拉取，走本地构建+scp，本场景合理例外，11.27s) → 新 hash **`index-DwMZPnzz.js`**(旧 `index-BCbZxWNX.js`) → 服务器 `dist.staging` 校验(hash + NodeList 类 + P0 `.overflow-x-auto` CSS 回归) → 原子切换(备份 `dist.backup.20260702-105132`) → 公网 `jb.aijiaxia.cc` 200 + 新 hash 生效 + 旧 hash 引用归 0。7 个 `.tsx`(6 P1 + tabs + NodeList) + 进度文档待用户授权提交。仅前端 dist，后端未 rebuild。**待**:360px 真机点验(详情页 tab 可滑到 README + 节点卡片手机竖排)。详见 [变更/2026-07-01-jb移动端适配修复.md](../变更/2026-07-01-jb移动端适配修复.md) 末尾「续」段。

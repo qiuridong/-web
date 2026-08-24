@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import subprocess
 import sys
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -18,6 +20,9 @@ MANIFEST_PATH = SCRIPT_DIR / "manifest.yaml"
 ASSETS_DIR = SCRIPT_DIR / "assets"
 CAPTCHA_FIXTURES = Path(__file__).parent / "fixtures" / "dmgongheguo_captcha"
 UI_FIXTURES = Path(__file__).parent / "fixtures" / "dmgongheguo_ui"
+
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 
 
 def _load_module(name: str, path: Path):
@@ -263,10 +268,14 @@ def test_manifest_and_asset_contract_pass_backend_validation():
 
     manifest = parse_manifest(MANIFEST_PATH)
     assert manifest.slug == "dmgongheguo"
-    assert str(manifest.version) == "1.1.0"
+    assert str(manifest.version) == "1.2.0"
     assert manifest.default_timeout_sec == 1200
     keys = [field.key for field in manifest.fields]
     assert keys[:2] == ["account", "password"]
+    assert "emulator_avd" in keys
+    assert "manage_emulator" in keys
+    assert "stop_emulator_after_run" in keys
+    assert "app_ready_timeout_sec" in keys
     assert (ASSETS_DIR / "ui" / "my-logged-out-header.png").is_file()
     assert len(list((ASSETS_DIR / "operators" / "multiply").glob("*.png"))) >= 8
     assert len(list((ASSETS_DIR / "operators" / "other").glob("*.png"))) >= 8
@@ -276,3 +285,162 @@ def test_adb_serial_is_fail_closed():
     main = load_main()
     with pytest.raises(main.ScriptError, match="emulator-6554"):
         main.AdbClient("adb", "unexpected-device", logging.getLogger("test"))
+
+
+def test_profile_signature_is_stable_and_changes_with_glyphs():
+    solver = load_solver()
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+
+    frame = np.full((1280, 720, 3), (36, 44, 61), dtype=np.uint8)
+    cv2.rectangle(frame, (175, 160), (190, 188), (245, 245, 245), -1)
+    cv2.rectangle(frame, (200, 164), (220, 188), (245, 245, 245), -1)
+    first = solver.inspect_profile_identity(frame)
+    second = solver.inspect_profile_identity(frame.copy())
+    assert first["profile_signature"] == second["profile_signature"]
+    assert first["policy"] == "nickname_glyph_sha256_v1"
+
+    changed = frame.copy()
+    cv2.rectangle(changed, (230, 155), (240, 188), (245, 245, 245), -1)
+    third = solver.inspect_profile_identity(changed)
+    assert first["profile_signature"] != third["profile_signature"]
+
+
+def test_account_binding_rejects_different_account_or_avd():
+    main = load_main()
+    expected = main._expected_binding("first@example.com", "poc34")
+    binding = {**expected, "profile_signature": "a" * 64}
+    main._validate_account_binding(binding, expected)
+
+    with pytest.raises(main.ScriptError, match="绑定不匹配"):
+        main._validate_account_binding(
+            binding,
+            main._expected_binding("second@example.com", "poc34"),
+        )
+    with pytest.raises(main.ScriptError, match="绑定不匹配"):
+        main._validate_account_binding(
+            binding,
+            main._expected_binding("first@example.com", "another-avd"),
+        )
+    assert "first@example.com" not in str(binding)
+
+
+def test_emulator_lifecycle_starts_expected_systemd_unit(monkeypatch):
+    from helpers.emulator_lifecycle import EmulatorLifecycle
+
+    lifecycle = EmulatorLifecycle(
+        adb_path="/sdk/adb",
+        serial="emulator-6554",
+        avd_name="poc34",
+        logger=logging.getLogger("test"),
+        start_timeout=60,
+        shutdown_timeout=5,
+        manage=True,
+        stop_after_run=True,
+        systemctl_path="/bin/systemctl",
+    )
+    states = iter(["absent", "device"])
+    systemctl_calls: list[tuple[str, ...]] = []
+    adb_calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(lifecycle, "_device_state", lambda: next(states))
+    monkeypatch.setattr(lifecycle, "_verify_unit_loaded", lambda: None)
+    monkeypatch.setattr(lifecycle, "_actual_avd_name", lambda: "poc34")
+    monkeypatch.setattr(lifecycle, "_unit_active", lambda: True)
+
+    def fake_systemctl(*args, **_kwargs):
+        systemctl_calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    def fake_adb(*args, **_kwargs):
+        adb_calls.append(args)
+        stdout = "1\n" if args[:3] == ("shell", "getprop", "sys.boot_completed") else ""
+        return subprocess.CompletedProcess(args, 0, stdout, "")
+
+    monkeypatch.setattr(lifecycle, "_systemctl", fake_systemctl)
+    monkeypatch.setattr(lifecycle, "_adb", fake_adb)
+    monkeypatch.setattr("helpers.emulator_lifecycle.time.sleep", lambda _value: None)
+
+    report = lifecycle.ensure_ready()
+    assert ("start", "dmgongheguo-emulator@poc34.service") in systemctl_calls
+    assert ("shell", "input", "keyevent", "82") in adb_calls
+    assert report["started_by_run"] is True
+    assert report["avd_name"] == "poc34"
+
+
+def test_emulator_lifecycle_rejects_wrong_running_avd(monkeypatch):
+    from helpers.emulator_lifecycle import EmulatorLifecycle, EmulatorLifecycleError
+
+    lifecycle = EmulatorLifecycle(
+        adb_path="adb",
+        serial="emulator-6554",
+        avd_name="poc34",
+        logger=logging.getLogger("test"),
+        start_timeout=60,
+        shutdown_timeout=5,
+        manage=True,
+        stop_after_run=True,
+    )
+    monkeypatch.setattr(lifecycle, "_device_state", lambda: "device")
+    monkeypatch.setattr(lifecycle, "_actual_avd_name", lambda: "wrong-avd")
+    with pytest.raises(EmulatorLifecycleError, match="实际 AVD"):
+        lifecycle.ensure_ready()
+
+
+def test_logged_in_unbound_avd_fails_and_still_stops(monkeypatch, tmp_path):
+    main = load_main()
+
+    class FakeLifecycle:
+        avd_name = "poc34"
+        started_by_run = True
+
+        def __init__(self):
+            self.stopped = False
+
+        def ensure_ready(self):
+            return {}
+
+        def stop(self):
+            self.stopped = True
+
+        def report(self):
+            return {"stopped": self.stopped, "avd_name": self.avd_name}
+
+    class FakeWorker:
+        def __init__(self, *_args):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+    lifecycle = FakeLifecycle()
+    monkeypatch.setattr(main, "ensure_ocr_runtime", lambda *_args: (Path("py"), Path("solver"), Path("assets")))
+    monkeypatch.setattr(main, "_build_lifecycle", lambda *_args: (lifecycle, 0))
+    monkeypatch.setattr(main, "ExclusiveFileLock", lambda *_args: nullcontext())
+    monkeypatch.setattr(main, "_sigterm_cleanup_guard", nullcontext)
+    monkeypatch.setattr(main, "_check_environment", lambda _adb: {})
+    monkeypatch.setattr(main, "_read_account_binding", lambda _adb: None)
+    monkeypatch.setattr(main, "OcrWorker", FakeWorker)
+    monkeypatch.setattr(main, "_launch_app", lambda _adb: None)
+    monkeypatch.setattr(
+        main, "_dismiss_announcements", lambda *_args, **_kwargs: 0
+    )
+    monkeypatch.setattr(
+        main,
+        "_navigate_my",
+        lambda *_args: ("my_logged_in", {"confidence": 0.99}, b"screen"),
+    )
+
+    @dataclass
+    class Context:
+        run_id: int = 1
+        instance_id: int = 5
+        data_dir: str = str(tmp_path)
+        logger: logging.Logger = field(default_factory=lambda: logging.getLogger("test"))
+
+    result = main.run({"account": "first@example.com"}, Context())
+    assert result.success is False
+    assert "没有账户绑定标记" in result.message
+    assert result.data["emulator"]["stopped"] is True

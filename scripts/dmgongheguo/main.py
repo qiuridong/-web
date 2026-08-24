@@ -1,6 +1,6 @@
 """动漫共和国每日签到：ADB + 登录保活 + 本地验证码识别。
 
-1.1.0 在确保 UK 官方 Android Emulator 登录态有效后执行幂等每日签到。
+1.2.0 增加 Emulator 按需启停、跨实例串行锁、AVD 绑定和昵称字形复核。
 验证码识别器只提交高置信乘法题，加/减/除法和不完整 token 链全部刷新。
 """
 
@@ -10,16 +10,26 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import logging
 import os
 import re
+import signal
 import shutil
 import subprocess
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from helpers.emulator_lifecycle import (
+    LOCK_PATH,
+    EmulatorLifecycle,
+    EmulatorLifecycleError,
+    ExclusiveFileLock,
+)
 
 PACKAGE = "com.shizi.tool.p3"
 LOCKED_SERIAL = "emulator-6554"
@@ -38,6 +48,8 @@ OCR_REQUIREMENTS = (
     "Pillow>=10,<13",
 )
 OCR_MARKER_VERSION = "dmgongheguo-ocr-v1"
+ACCOUNT_BINDING_PATH = "/data/local/tmp/.dmgongheguo-account-binding-v1.json"
+ACCOUNT_BINDING_SCHEMA = 1
 
 
 @dataclass
@@ -57,6 +69,144 @@ class AdbError(ScriptError):
 
 class OcrRuntimeError(ScriptError):
     pass
+
+
+def _normalized_account(config: dict[str, Any]) -> str:
+    account = str(config.get("account") or "").strip().lower()
+    if not account:
+        raise ScriptError("必须配置邮箱账号，才能绑定 Emulator 与登录身份")
+    if not re.fullmatch(r"[a-z0-9._-]+@[a-z0-9.-]+", account):
+        raise ScriptError("account 不是受支持的邮箱格式")
+    return account
+
+
+def _account_hash(account: str) -> str:
+    return hashlib.sha256(
+        ("dmgongheguo-account-v1\0" + account).encode("utf-8")
+    ).hexdigest()
+
+
+def _expected_binding(account: str, avd_name: str) -> dict[str, Any]:
+    return {
+        "schema": ACCOUNT_BINDING_SCHEMA,
+        "package": PACKAGE,
+        "avd_name": avd_name,
+        "account_sha256": _account_hash(account),
+    }
+
+
+def _read_account_binding(adb: AdbClient) -> dict[str, Any] | None:
+    result = adb.run(
+        "shell",
+        "cat",
+        ACCOUNT_BINDING_PATH,
+        timeout=10,
+        check=False,
+        sensitive=True,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).lower()
+        if "no such file" in detail or "not found" in detail:
+            return None
+        raise ScriptError("读取 Emulator 账户绑定标记失败")
+    try:
+        value = json.loads(result.stdout)
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ScriptError("Emulator 账户绑定标记损坏，拒绝覆盖") from exc
+    if not isinstance(value, dict):
+        raise ScriptError("Emulator 账户绑定标记格式错误")
+    return value
+
+
+def _validate_account_binding(
+    binding: dict[str, Any], expected: dict[str, Any]
+) -> None:
+    for key, value in expected.items():
+        if binding.get(key) != value:
+            raise ScriptError(
+                "Emulator 与当前实例的 AVD/账号绑定不匹配；"
+                "切换账户必须使用独立 AVD"
+            )
+    signature = str(binding.get("profile_signature") or "")
+    if re.fullmatch(r"[0-9a-f]{64}", signature) is None:
+        raise ScriptError("Emulator 账户绑定缺少有效的昵称字形签名")
+
+
+def _profile_signature(worker: OcrWorker, png: bytes) -> str:
+    result = worker.request("profile", png)
+    signature = str(result.get("profile_signature") or "")
+    if re.fullmatch(r"[0-9a-f]{64}", signature) is None:
+        raise ScriptError("无法提取当前登录用户的昵称字形签名")
+    return signature
+
+
+def _verify_profile_signature(binding: dict[str, Any], actual: str) -> None:
+    if binding.get("profile_signature") != actual:
+        raise ScriptError(
+            "当前 App 登录用户与此 Emulator 的已绑定身份不一致，已停止签到"
+        )
+
+
+def _write_account_binding(
+    adb: AdbClient,
+    context: Any,
+    expected: dict[str, Any],
+    profile_signature: str,
+) -> dict[str, Any]:
+    binding = {**expected, "profile_signature": profile_signature}
+    data_dir = Path(context.data_dir)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    upload = data_dir / f".account-binding-upload-{os.getpid()}.json"
+    try:
+        upload.write_text(
+            json.dumps(binding, ensure_ascii=True, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+        )
+        if os.name != "nt":
+            upload.chmod(0o600)
+        adb.run(
+            "push",
+            str(upload),
+            ACCOUNT_BINDING_PATH,
+            timeout=20,
+            sensitive=True,
+        )
+        adb.run(
+            "shell",
+            "chmod",
+            "600",
+            ACCOUNT_BINDING_PATH,
+            timeout=10,
+            sensitive=True,
+        )
+        adb.run("shell", "sync", timeout=20, sensitive=True)
+    finally:
+        upload.unlink(missing_ok=True)
+    written = _read_account_binding(adb)
+    if written is None:
+        raise ScriptError("写入 Emulator 账户绑定标记后复核失败")
+    _validate_account_binding(written, expected)
+    _verify_profile_signature(written, profile_signature)
+    return written
+
+
+@contextmanager
+def _sigterm_cleanup_guard():
+    """把 Agent 的 SIGTERM 转成可展开 finally 的 SystemExit。"""
+
+    if os.name == "nt":
+        yield
+        return
+    previous = signal.getsignal(signal.SIGTERM)
+
+    def _terminate(signum: int, _frame: Any) -> None:
+        raise SystemExit(128 + signum)
+
+    signal.signal(signal.SIGTERM, _terminate)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
 
 def _bounded_int(config: dict[str, Any], key: str, default: int, low: int, high: int) -> int:
@@ -403,15 +553,22 @@ def _launch_app(adb: AdbClient) -> None:
         "current",
         "-n",
         f"{PACKAGE}/{SPLASH_ACTIVITY}",
-        timeout=50,
+        timeout=160,
     )
     # 仅在 App 不在前台时启动；-W 后再留一小段首帧缓冲。
     time.sleep(2.5)
 
 
-def _dismiss_announcements(adb: AdbClient, worker: OcrWorker) -> int:
+def _dismiss_announcements(
+    adb: AdbClient,
+    worker: OcrWorker,
+    *,
+    timeout: int = 240,
+) -> int:
     closed = 0
-    deadline = time.monotonic() + 100
+    started_at = time.monotonic()
+    deadline = started_at + timeout
+    next_progress_log = started_at + 30
     while time.monotonic() < deadline:
         png = adb.screenshot()
         surface = str(worker.request("ui", png).get("surface"))
@@ -424,11 +581,19 @@ def _dismiss_announcements(adb: AdbClient, worker: OcrWorker) -> int:
             continue
         if surface != "unknown":
             return closed
+        if time.monotonic() >= next_progress_log:
+            adb.logger.info(
+                "App 冷启动仍在加载，已等待 %d 秒",
+                int(time.monotonic() - started_at),
+            )
+            next_progress_log += 30
         time.sleep(1.5)
-    raise ScriptError("App 启动后长期处于未知界面")
+    raise ScriptError(f"App 启动后 {timeout} 秒仍处于未知界面")
 
 
-def _navigate_my(adb: AdbClient, worker: OcrWorker) -> tuple[str, dict[str, Any]]:
+def _navigate_my(
+    adb: AdbClient, worker: OcrWorker
+) -> tuple[str, dict[str, Any], bytes]:
     # 上次任务可能中止在验证码或登录页。先有界返回到带底栏的页面，避免把
     # “我的”坐标点在模态框背后。
     for _ in range(3):
@@ -436,20 +601,20 @@ def _navigate_my(adb: AdbClient, worker: OcrWorker) -> tuple[str, dict[str, Any]
         evidence = worker.request("ui", png)
         surface = str(evidence.get("surface"))
         if surface in {"my_logged_in", "my_logged_out"}:
-            return surface, evidence
+            return surface, evidence, png
         if surface not in {"captcha", "login_form"}:
             break
         adb.key("4")
         time.sleep(1.5)
 
     adb.tap(630, 1210)
-    surface, evidence, _ = _wait_surface(
+    surface, evidence, png = _wait_surface(
         adb,
         worker,
         {"my_logged_in", "my_logged_out"},
         timeout=12,
     )
-    return surface, evidence
+    return surface, evidence, png
 
 
 def _ensure_email_form(adb: AdbClient, worker: OcrWorker) -> None:
@@ -571,12 +736,10 @@ def _login_with_captcha(
     config: dict[str, Any],
     logger: logging.Logger,
 ) -> dict[str, Any]:
-    account = str(config.get("account") or "").strip()
+    account = _normalized_account(config)
     password = str(config.get("password") or "")
-    if not account or not password:
-        raise ScriptError("登录态已失效，请在实例中配置邮箱账号和密码")
-    if not re.fullmatch(r"[A-Za-z0-9._-]+@[A-Za-z0-9.-]+", account):
-        raise ScriptError("account 不是受支持的邮箱格式")
+    if not password:
+        raise ScriptError("登录态已失效，请在实例中配置登录密码")
 
     min_confidence = _bounded_float(config, "captcha_min_confidence", 0.72, 0.5, 0.99)
     max_images = _bounded_int(config, "captcha_max_images", 18, 4, 30)
@@ -727,6 +890,32 @@ def _perform_daily_checkin(adb: AdbClient, worker: OcrWorker) -> dict[str, Any]:
     }
 
 
+def _build_lifecycle(
+    config: dict[str, Any], adb_path: str, serial: str, logger: logging.Logger
+) -> tuple[EmulatorLifecycle, int]:
+    avd_name = str(config.get("emulator_avd") or "poc34").strip()
+    start_timeout = _bounded_int(
+        config, "emulator_start_timeout_sec", 300, 60, 600
+    )
+    shutdown_timeout = _bounded_int(
+        config, "emulator_shutdown_timeout_sec", 60, 10, 120
+    )
+    lock_timeout = _bounded_int(
+        config, "emulator_lock_timeout_sec", 600, 0, 900
+    )
+    lifecycle = EmulatorLifecycle(
+        adb_path=adb_path,
+        serial=serial,
+        avd_name=avd_name,
+        logger=logger,
+        start_timeout=start_timeout,
+        shutdown_timeout=shutdown_timeout,
+        manage=bool(config.get("manage_emulator", True)),
+        stop_after_run=bool(config.get("stop_emulator_after_run", True)),
+    )
+    return lifecycle, lock_timeout
+
+
 def run(config: dict[str, Any], context: Any) -> RunResult:
     logger: logging.Logger = context.logger
     if context.run_id == 0 and context.instance_id == 0:
@@ -743,53 +932,118 @@ def run(config: dict[str, Any], context: Any) -> RunResult:
     adb_path = str(config.get("adb_path") or "/opt/android-sdk/platform-tools/adb")
     serial = str(config.get("adb_serial") or LOCKED_SERIAL)
     adb = AdbClient(adb_path, serial, logger)
+    lifecycle: EmulatorLifecycle | None = None
 
     try:
-        environment = _check_environment(adb)
+        account = _normalized_account(config)
         python, solver, assets = ensure_ocr_runtime(config, context, logger)
-        with OcrWorker(python, solver, assets) as worker:
-            _launch_app(adb)
-            closed = _dismiss_announcements(adb, worker)
-            surface, login_evidence = _navigate_my(adb, worker)
-            already_logged_in = surface == "my_logged_in"
-            login_result: dict[str, Any] = {}
-            if surface == "my_logged_in":
-                login_result["login_confidence"] = login_evidence.get("confidence")
-            else:
-                login_result = _login_with_captcha(adb, worker, config, logger)
+        lifecycle, lock_timeout = _build_lifecycle(config, adb_path, serial, logger)
+        result: RunResult | None = None
+        with _sigterm_cleanup_guard(), ExclusiveFileLock(
+            LOCK_PATH, lock_timeout, logger
+        ):
+            ready = False
+            try:
+                lifecycle.ensure_ready()
+                ready = True
+                environment = _check_environment(adb)
+                expected_binding = _expected_binding(account, lifecycle.avd_name)
+                binding = _read_account_binding(adb)
+                if binding is not None:
+                    _validate_account_binding(binding, expected_binding)
 
-            checkin_result = _perform_daily_checkin(adb, worker)
-            already_checked_in = bool(checkin_result.get("already_checked_in"))
-            return RunResult(
-                success=True,
-                message=(
-                    "动漫共和国今日已签到"
-                    if already_checked_in
-                    else "动漫共和国签到成功"
-                ),
-                data={
-                    "action": "daily_checkin",
-                    "already_logged_in": already_logged_in,
-                    "announcements_closed": closed,
-                    "environment": environment,
-                    "checkin_action_enabled": True,
-                    **login_result,
-                    **checkin_result,
-                },
-            )
-    except ScriptError as exc:
+                with OcrWorker(python, solver, assets) as worker:
+                    _launch_app(adb)
+                    app_ready_timeout = _bounded_int(
+                        config, "app_ready_timeout_sec", 240, 120, 480
+                    )
+                    closed = _dismiss_announcements(
+                        adb, worker, timeout=app_ready_timeout
+                    )
+                    surface, login_evidence, my_png = _navigate_my(adb, worker)
+                    already_logged_in = surface == "my_logged_in"
+                    login_result: dict[str, Any] = {}
+                    if already_logged_in:
+                        if binding is None:
+                            raise ScriptError(
+                                "当前 AVD 已登录但没有账户绑定标记；"
+                                "需先由管理员核实并完成一次性迁移"
+                            )
+                        signature = _profile_signature(worker, my_png)
+                        _verify_profile_signature(binding, signature)
+                        login_result["login_confidence"] = login_evidence.get(
+                            "confidence"
+                        )
+                    else:
+                        login_result = _login_with_captcha(
+                            adb, worker, config, logger
+                        )
+                        _, _, my_png = _wait_surface(
+                            adb, worker, {"my_logged_in"}, timeout=12
+                        )
+                        signature = _profile_signature(worker, my_png)
+                        if binding is None:
+                            binding = _write_account_binding(
+                                adb,
+                                context,
+                                expected_binding,
+                                signature,
+                            )
+                            logger.info("已建立 AVD、账号与昵称字形三重绑定")
+                        else:
+                            _verify_profile_signature(binding, signature)
+
+                    checkin_result = _perform_daily_checkin(adb, worker)
+                    already_checked_in = bool(
+                        checkin_result.get("already_checked_in")
+                    )
+                    result = RunResult(
+                        success=True,
+                        message=(
+                            "动漫共和国今日已签到"
+                            if already_checked_in
+                            else "动漫共和国签到成功"
+                        ),
+                        data={
+                            "action": "daily_checkin",
+                            "already_logged_in": already_logged_in,
+                            "announcements_closed": closed,
+                            "environment": environment,
+                            "account_binding_verified": True,
+                            "checkin_action_enabled": True,
+                            **login_result,
+                            **checkin_result,
+                        },
+                    )
+            finally:
+                if ready or lifecycle.started_by_run:
+                    lifecycle.stop()
+        if result is None:
+            raise ScriptError("签到流程未生成结果")
+        result.data["emulator"] = lifecycle.report()
+        return result
+    except (ScriptError, EmulatorLifecycleError) as exc:
         logger.error("动漫共和国登录保活失败：%s", exc)
+        data: dict[str, Any] = {
+            "action": "daily_checkin",
+            "error_class": type(exc).__name__,
+        }
+        if lifecycle is not None:
+            data["emulator"] = lifecycle.report()
         return RunResult(
             success=False,
             message=str(exc)[:512],
-            data={"action": "daily_checkin", "error_class": type(exc).__name__},
+            data=data,
         )
     except Exception as exc:  # 平台边界：未知异常仍返回结构化 failure
         logger.exception("动漫共和国登录保活出现未预期异常")
+        data = {"action": "daily_checkin", "error_class": type(exc).__name__}
+        if lifecycle is not None:
+            data["emulator"] = lifecycle.report()
         return RunResult(
             success=False,
             message=f"{type(exc).__name__}: {exc}"[:512],
-            data={"action": "daily_checkin", "error_class": type(exc).__name__},
+            data=data,
         )
 
 
