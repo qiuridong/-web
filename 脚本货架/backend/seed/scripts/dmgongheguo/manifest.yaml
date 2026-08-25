@@ -13,8 +13,9 @@ description: |
   Android Emulator 由 systemd 按需启动，所有实例共享全局串行锁；任务成功、
   失败或收到 SIGTERM 都会优雅关机。每个账户绑定独立 AVD，并以昵称字形签名
   复核登录身份。替换单账户时只需在管家修改账号密码，Agent 会受控清理旧会话、
-  自动登录新账号并重建绑定；同时保留多个账户时仍需每账户独立 AVD。
-version: 1.2.1
+  自动登录新账号并重建绑定；v1.2.3 加固全冷启动、延迟公告、底栏重试、验证码
+  临界刷新恢复，并改用与账户余额无关的首日勾选标记判定已签到；同时保留多个账户时仍需每账户独立 AVD。
+version: 1.2.3
 author: yunkelai
 
 default_cron: "20 8 * * *"
@@ -107,10 +108,10 @@ fields:
   - key: captcha_max_images
     label: 单次最多查看验证码数
     type: integer
-    default: 18
+    default: 30
     min: 4
     max: 30
-    description: 低置信图片只刷新不提交；弹窗超时后会重新打开继续计数。
+    description: 低置信图片只刷新不提交；默认 30 张提高首次换号登录成功率，弹窗超时后会重新打开继续计数。
 
   - key: captcha_max_submissions
     label: 最多验证码提交次数

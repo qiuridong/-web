@@ -49,7 +49,7 @@
 
 ### 本分支上的其它功能（非货架）
 
-- [x] **📱 动漫共和国 v1.2.1 按需 Emulator + 管家自动换绑** — v1.2.0 已完成 systemd 冷启动/自动关机、全局锁和身份绑定，run `46` 真实闭环；2026-08-25 增加单账户只改面板账号密码即可自动清旧会话并重建绑定
+- [x] **📱 动漫共和国 v1.2.3 按需 Emulator + 管家自动换绑** — v1.2.0 已完成 systemd 冷启动/自动关机、全局锁和身份绑定，run `46` 真实闭环；2026-08-25 完成单账户面板改密后自动换绑，run `56` 真实登录新账户，run `57` 复用持久会话并成功识别今日已签到
 
 ---
 
@@ -86,11 +86,15 @@
 | 2026-08-24 | 生产 run `46`：关机态冷启动 `poc34` → 身份绑定复核 → 今日已签到 → 自动关机 | ✅ `success` / `account_binding_verified=true` / `stopped=true` |
 | 2026-08-25 | 动漫共和国 v1.2.1 自动换绑状态机 / Ruff / 双端 sandbox / 四份目录一致性 | ✅ `40 passed` / All checks passed / 两端 dry-run success / 4×37 文件摘要一致 |
 | 2026-08-25 | v1.2.1 主面板扫描 + UK Agent 同步 | ✅ `updated=1 errors=0` / bundle `2b550096…` / 实例原账号与 Emulator 均未改动 |
+| 2026-08-25 | 动漫共和国 v1.2.3 完整 OCR/UI 回归 + Ruff + 双端 sandbox + 主/seed 一致性 | ✅ `45 passed` / All checks passed / 两端 dry-run success / 38×2 文件一致 |
+| 2026-08-25 | 换号真实验收 run `56` / v1.2.3 生产闭环 run `57` | ✅ 新账户登录+绑定持久 / `success` / `already_logged_in=true` / `already_checked_in=true` / Emulator 已自动关闭 |
 | — | install/migrate VPS 实测 | ⏳ M4 |
 
 ---
 
 ## 最近迭代（倒序）
+
+- 2026-08-25（✅ **动漫共和国换号登录与签到状态已修复，v1.2.3 生产闭环通过**）从用户改密后的生产 run `48`～`56` 重建时间线：`pm clear` 后 `am start -W` 把 arm64 App 长初始化误当失败；延迟公告/Flutter 首次触摸丢失没有导航恢复；高置信验证码在第 18 张输入期间自动换图，旧循环安全放弃过期答案却同时用尽预算；v1.2.2 修复这三处后，run `56` 在第 20 张临界换图后保留预算重试，**新账户真实登录成功并写入新 AVD/账号/昵称字形绑定**。run `56` 最后的失败只是旧“已签到”模板包含账户可变的金币余额，换号后固定模板分数约 0.400，把明确有首日勾选的页面判为 `unknown`。v1.2.3 改用与余额无关的 45×45 首日勾选 ROI，并新增任务底栏有界恢复状态机；生产回放分数 `nav≈1.000/layout≈0.998/signed=1.000`。完整 OCR/UI 回归 `45 passed`、backend venv `19 passed`+预期 OCR skip、Ruff/py_compile/主 seed 38 文件一致全绿；面板扫描 `updated=1 errors=0`，UK Agent bundle `1b488d49…` ack 完成。**生产 run `57` 最终 `success`：`already_logged_in=true`、`account_binding_verified=true`、`already_checked_in=true`、`checkin_action_enabled=true`**，87.378 秒内完成并自动关闭 Emulator，unit 终态 `inactive/dead`。下一个未签到日只需自然观察实际点击路径，不为重演而清 App 数据。详见 [变更/2026-08-25-动漫共和国换号登录与签到状态修复.md](../变更/2026-08-25-动漫共和国换号登录与签到状态修复.md)。
 
 - 2026-08-25（✅ **动漫共和国 v1.2.1 管家下发自动换绑已部署**）用户指出情况 A 还要人工暂停、SSH 清理和换绑过于麻烦，因此把“修改面板账号”本身升级为一次性换绑信号：实例配置账号哈希与 `poc34` 旧绑定不同时，Agent 先验证绑定确属当前 App/AVD；旧账号仍登录则再核对昵称字形；确认新密码存在后执行 `force-stop → pm clear → rm marker → sync`，重新启动并确认未登录，再用管家下发的新凭据走验证码登录，只有真实登录成功才写新哈希/昵称绑定，然后幂等签到并关机。结果新增 `account_rebound=true`，失败清理后记录 `account_rebind_attempted=true`；`auto_rebind_account=false` 可恢复只报错模式。**情况 A 现在只需编辑原 instance `5`，无需新实例/新 AVD；情况 B 两账户共存仍是一账户一 AVD 一实例。**测试 `40 passed`、Ruff、本地/UK dry-run 全绿；主面板 v1.2.1 扫描 `updated=1 errors=0`，Agent bundle `2b550096…`，四份 37 文件摘要 `fde80afe…` 一致。没有为了部署触发真实签到或清除当前会话；真实换绑等用户填写新凭据。详见 [变更/2026-08-25-动漫共和国管家下发自动换绑.md](../变更/2026-08-25-动漫共和国管家下发自动换绑.md)。
 

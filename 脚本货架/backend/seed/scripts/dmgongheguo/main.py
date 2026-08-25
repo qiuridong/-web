@@ -1,6 +1,6 @@
 """动漫共和国每日签到：ADB + 登录保活 + 本地验证码识别。
 
-1.2.1 支持管家下发新账号后在同一 AVD 内受控清理旧会话并自动换绑。
+1.2.3 修复新账户金币余额变化导致“已签到”状态误判，并加固任务底栏导航。
 验证码识别器只提交高置信乘法题，加/减/除法和不完整 token 链全部刷新。
 """
 
@@ -165,6 +165,7 @@ def _require_login_password(config: dict[str, Any]) -> str:
 def _reset_app_for_account_rebind(adb: AdbClient) -> None:
     """在已验证的 AVD 内清除旧 App 会话和旧绑定，不触碰 APK/AVD。"""
 
+    adb.logger.info("自动换绑：正在停止旧 App")
     adb.run(
         "shell",
         "am",
@@ -184,6 +185,7 @@ def _reset_app_for_account_rebind(adb: AdbClient) -> None:
     )
     if cleared.returncode != 0 or "success" not in cleared.stdout.lower():
         raise ScriptError("清理旧 App 账户数据失败，已停止自动换绑")
+    adb.logger.info("自动换绑：旧 App 数据已清理")
     adb.run(
         "shell",
         "rm",
@@ -195,6 +197,7 @@ def _reset_app_for_account_rebind(adb: AdbClient) -> None:
     adb.run("shell", "sync", timeout=20, sensitive=True)
     if _read_account_binding(adb) is not None:
         raise ScriptError("清理后旧账户绑定标记仍然存在，已停止自动换绑")
+    adb.logger.info("自动换绑：旧账户绑定标记已清理并落盘")
 
 
 def _profile_signature(worker: OcrWorker, png: bytes) -> str:
@@ -613,14 +616,15 @@ def _launch_app(adb: AdbClient) -> None:
         "shell",
         "am",
         "start",
-        "-W",
         "--user",
         "current",
         "-n",
         f"{PACKAGE}/{SPLASH_ACTIVITY}",
-        timeout=160,
+        timeout=30,
     )
-    # 仅在 App 不在前台时启动；-W 后再留一小段首帧缓冲。
+    # ``am start -W`` 会一直等 Activity 完成启动。pm clear 后的 arm64 App 在
+    # x86 NDK translation 下可能初始化 160 秒以上，命令超时并不表示启动失败。
+    # 改为非阻塞启动，把完整就绪判断统一交给 _dismiss_announcements 的截图状态机。
     time.sleep(2.5)
 
 
@@ -659,27 +663,60 @@ def _dismiss_announcements(
 def _navigate_my(
     adb: AdbClient, worker: OcrWorker
 ) -> tuple[str, dict[str, Any], bytes]:
-    # 上次任务可能中止在验证码或登录页。先有界返回到带底栏的页面，避免把
-    # “我的”坐标点在模态框背后。
-    for _ in range(3):
+    """从已知安全界面有界恢复到“我的”，容忍延迟公告和一次丢触摸。"""
+
+    deadline = time.monotonic() + 45
+    back_presses = 0
+    announcement_taps = 0
+    nav_taps = 0
+    last_surface = "unknown"
+    while time.monotonic() < deadline:
         png = adb.screenshot()
         evidence = worker.request("ui", png)
         surface = str(evidence.get("surface"))
+        last_surface = surface
         if surface in {"my_logged_in", "my_logged_out"}:
             return surface, evidence, png
-        if surface not in {"captcha", "login_form"}:
-            break
-        adb.key("4")
+
+        if surface in {"captcha", "login_form"} and back_presses < 3:
+            adb.key("4")
+            back_presses += 1
+            time.sleep(1.5)
+            continue
+
+        # 公告有时在首页已经出现后才延迟弹出；原流程只在启动阶段关闭一次，
+        # 导航阶段会把“我的”点击落在遮罩层后。这里只点击已被分类器确认的
+        # 公告关闭坐标，并给触摸丢失留下重试预算。
+        if surface == "announcement":
+            if announcement_taps >= 6:
+                raise ScriptError("导航期间公告关闭重试超过安全上限")
+            adb.tap(435, 1018)
+            announcement_taps += 1
+            time.sleep(2.5)
+            continue
+
+        if surface == "task_success_dialog":
+            adb.key("4")
+            back_presses += 1
+            time.sleep(1.5)
+            continue
+
+        # 只在确认底栏可见的固定界面点击“我的”。Flutter 首次全冷启动时
+        # 第一次点击偶尔被页面初始化吞掉，因此允许有界重复。
+        if surface in {"home", "task_ready", "task_signed"}:
+            if nav_taps >= 6:
+                raise ScriptError("“我的”底栏点击重试超过安全上限")
+            adb.tap(630, 1210)
+            nav_taps += 1
+            time.sleep(2.5)
+            continue
+
         time.sleep(1.5)
 
-    adb.tap(630, 1210)
-    surface, evidence, png = _wait_surface(
-        adb,
-        worker,
-        {"my_logged_in", "my_logged_out"},
-        timeout=12,
+    raise ScriptError(
+        "等待界面超时 expected=['my_logged_in', 'my_logged_out'] "
+        f"last={last_surface}"
     )
-    return surface, evidence, png
 
 
 def _ensure_email_form(adb: AdbClient, worker: OcrWorker) -> None:
@@ -805,7 +842,7 @@ def _login_with_captcha(
     password = _require_login_password(config)
 
     min_confidence = _bounded_float(config, "captcha_min_confidence", 0.72, 0.5, 0.99)
-    max_images = _bounded_int(config, "captcha_max_images", 18, 4, 30)
+    max_images = _bounded_int(config, "captcha_max_images", 30, 4, 30)
     max_submissions = _bounded_int(config, "captcha_max_submissions", 2, 1, 3)
     refresh_interval = _bounded_int(
         config, "captcha_refresh_interval_sec", 12, 5, 30
@@ -818,7 +855,10 @@ def _login_with_captcha(
     refreshes = 0
     modal_rounds = 1
 
-    for image_index in range(1, max_images + 1):
+    image_index = 0
+    stale_retries = 0
+    while image_index < max_images:
+        image_index += 1
         solved = worker.request(
             "captcha",
             png,
@@ -844,6 +884,13 @@ def _login_with_captcha(
             current = worker.request("fingerprint", before_submit)
             if str(current.get("formula_fingerprint") or "") != fingerprint:
                 logger.warning("输入答案期间验证码已刷新，放弃本次提交")
+                stale_retries += 1
+                if stale_retries > 3:
+                    raise ScriptError("验证码连续在输入期间刷新，已停止本轮登录")
+                # 这张题已经在提交前失效，不占用户配置的有效图片预算；让当前
+                # 新图继续使用同一个序号，避免恰好在第 max_images 张命中时直接
+                # 退出。旧答案会在下一次高置信命中时 select_all 覆盖。
+                image_index -= 1
                 png = before_submit
                 continue
             adb.tap(523, 700)
@@ -856,6 +903,7 @@ def _login_with_captcha(
                     "captcha_refreshes": refreshes,
                     "captcha_submissions": submissions,
                     "modal_rounds": modal_rounds,
+                    "captcha_stale_retries": stale_retries,
                     "solver_confidence": confidence,
                     "solver_expression": expression,
                 }
@@ -907,16 +955,57 @@ def _login_with_captcha(
     )
 
 
+def _navigate_task(
+    adb: AdbClient, worker: OcrWorker
+) -> tuple[str, dict[str, Any], bytes]:
+    """从已知安全界面有界进入任务中心，容忍延迟公告和丢触摸。"""
+
+    deadline = time.monotonic() + 45
+    announcement_taps = 0
+    nav_taps = 0
+    last_surface = "unknown"
+    while time.monotonic() < deadline:
+        png = adb.screenshot()
+        evidence = worker.request("ui", png)
+        surface = str(evidence.get("surface"))
+        last_surface = surface
+        if surface in {"task_ready", "task_signed", "task_success_dialog"}:
+            return surface, evidence, png
+
+        if surface == "announcement":
+            if announcement_taps >= 6:
+                raise ScriptError("任务导航期间公告关闭重试超过安全上限")
+            adb.tap(435, 1018)
+            announcement_taps += 1
+            time.sleep(2.5)
+            continue
+
+        # 任务底栏在首页和已登录“我的”页都是固定安全坐标。
+        # Flutter 页面初始化可能吞掉首次点击，因此只在这两种已知
+        # 界面有界重试，不在 unknown/登录表单上盲点。
+        if surface in {"home", "my_logged_in"}:
+            if nav_taps >= 6:
+                raise ScriptError("“任务”底栏点击重试超过安全上限")
+            adb.tap(450, 1210)
+            nav_taps += 1
+            time.sleep(2.5)
+            continue
+
+        if surface == "my_logged_out":
+            raise ScriptError("进入任务中心前登录态已失效")
+
+        time.sleep(1.5)
+
+    raise ScriptError(
+        "等待界面超时 expected=['task_ready', 'task_signed', "
+        f"'task_success_dialog'] last={last_surface}"
+    )
+
+
 def _perform_daily_checkin(adb: AdbClient, worker: OcrWorker) -> dict[str, Any]:
     """进入任务中心，按前后置模板幂等执行一次签到。"""
 
-    adb.tap(450, 1210)
-    surface, evidence, _ = _wait_surface(
-        adb,
-        worker,
-        {"task_ready", "task_signed", "task_success_dialog"},
-        timeout=18,
-    )
+    surface, evidence, _ = _navigate_task(adb, worker)
     if surface == "task_success_dialog":
         adb.key("4")
         surface, evidence, _ = _wait_surface(
@@ -935,7 +1024,7 @@ def _perform_daily_checkin(adb: AdbClient, worker: OcrWorker) -> dict[str, Any]:
         adb,
         worker,
         {"task_success_dialog", "task_signed"},
-        timeout=30,
+        timeout=60,
     )
     success_dialog_seen = surface == "task_success_dialog"
     if success_dialog_seen:

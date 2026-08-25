@@ -151,6 +151,23 @@ def test_ui_classifier_uses_fixed_safe_surfaces():
             assert result["login_mode"] == mode
 
 
+def test_task_signed_classifier_ignores_variable_balance():
+    solver = load_solver()
+    np = pytest.importorskip("numpy")
+    image_module = pytest.importorskip("PIL.Image")
+
+    with image_module.open(UI_FIXTURES / "task-signed.png") as source:
+        frame = np.asarray(source.convert("RGB")).copy()
+    # 旧模板把这个账户可变的余额区域当成已签到依据。
+    # 覆盖它模拟换账户; 首日勾选标记仍应独立判定成功。
+    frame[145:345, 250:470] = frame[145, 250]
+
+    result = solver.inspect_ui(frame, ASSETS_DIR)
+
+    assert result["surface"] == "task_signed"
+    assert result["scores"]["signed"] >= 0.90
+
+
 def test_unknown_login_mode_can_recover_to_email(monkeypatch):
     main = load_main()
 
@@ -184,6 +201,47 @@ def test_unknown_login_mode_can_recover_to_email(monkeypatch):
     assert adb.taps == [(235, 210), (150, 746), (150, 746)]
 
 
+def test_navigate_my_retries_lost_tap_and_closes_delayed_announcement(
+    monkeypatch,
+):
+    main = load_main()
+
+    class FakeAdb:
+        def __init__(self):
+            self.taps: list[tuple[int, int]] = []
+
+        def screenshot(self) -> bytes:
+            return b"fixture"
+
+        def tap(self, x: int, y: int) -> None:
+            self.taps.append((x, y))
+
+        def key(self, _value: str) -> None:
+            raise AssertionError("known home/announcement recovery must not press back")
+
+    class FakeWorker:
+        def __init__(self):
+            self.responses = iter(
+                [
+                    {"surface": "home", "confidence": 0.99},
+                    {"surface": "announcement", "confidence": 0.98},
+                    {"surface": "home", "confidence": 0.99},
+                    {"surface": "my_logged_out", "confidence": 0.97},
+                ]
+            )
+
+        def request(self, mode: str, image: bytes):
+            assert mode == "ui" and image == b"fixture"
+            return next(self.responses)
+
+    monkeypatch.setattr(main.time, "sleep", lambda _value: None)
+    adb = FakeAdb()
+    surface, _, _ = main._navigate_my(adb, FakeWorker())
+
+    assert surface == "my_logged_out"
+    assert adb.taps == [(630, 1210), (435, 1018), (630, 1210)]
+
+
 def test_dry_run_short_circuits_before_adb_or_ocr():
     main = load_main()
 
@@ -214,14 +272,60 @@ def test_daily_checkin_is_idempotent_when_already_signed(monkeypatch):
             return b"fixture"
 
     class FakeWorker:
+        def __init__(self):
+            self.responses = iter(
+                [
+                    {"surface": "my_logged_in", "confidence": 0.99},
+                    {"surface": "task_signed", "confidence": 0.99},
+                ]
+            )
+
         def request(self, mode: str, image: bytes):
-            return {"surface": "task_signed", "confidence": 0.99}
+            return next(self.responses)
 
     monkeypatch.setattr(main.time, "sleep", lambda _: None)
     adb = FakeAdb()
     result = main._perform_daily_checkin(adb, FakeWorker())
     assert result["already_checked_in"] is True
     assert adb.taps == [(450, 1210)]
+
+
+def test_navigate_task_retries_lost_tap_and_closes_delayed_announcement(
+    monkeypatch,
+):
+    main = load_main()
+
+    class FakeAdb:
+        def __init__(self):
+            self.taps: list[tuple[int, int]] = []
+
+        def tap(self, x: int, y: int) -> None:
+            self.taps.append((x, y))
+
+        def screenshot(self) -> bytes:
+            return b"fixture"
+
+    class FakeWorker:
+        def __init__(self):
+            self.responses = iter(
+                [
+                    {"surface": "my_logged_in", "confidence": 0.99},
+                    {"surface": "announcement", "confidence": 0.98},
+                    {"surface": "my_logged_in", "confidence": 0.99},
+                    {"surface": "task_signed", "confidence": 0.99},
+                ]
+            )
+
+        def request(self, mode: str, image: bytes):
+            assert mode == "ui" and image == b"fixture"
+            return next(self.responses)
+
+    monkeypatch.setattr(main.time, "sleep", lambda _: None)
+    adb = FakeAdb()
+    surface, _, _ = main._navigate_task(adb, FakeWorker())
+
+    assert surface == "task_signed"
+    assert adb.taps == [(450, 1210), (435, 1018), (450, 1210)]
 
 
 def test_daily_checkin_clicks_once_and_requires_postcondition(monkeypatch):
@@ -245,6 +349,7 @@ def test_daily_checkin_clicks_once_and_requires_postcondition(monkeypatch):
         def __init__(self):
             self.responses = iter(
                 [
+                    {"surface": "my_logged_in", "confidence": 0.99},
                     {"surface": "task_ready", "confidence": 0.99},
                     {"surface": "task_success_dialog", "confidence": 0.99},
                     {"surface": "task_signed", "confidence": 0.99},
@@ -268,7 +373,7 @@ def test_manifest_and_asset_contract_pass_backend_validation():
 
     manifest = parse_manifest(MANIFEST_PATH)
     assert manifest.slug == "dmgongheguo"
-    assert str(manifest.version) == "1.2.1"
+    assert str(manifest.version) == "1.2.3"
     assert manifest.default_timeout_sec == 1200
     keys = [field.key for field in manifest.fields]
     assert keys[:2] == ["account", "password"]
@@ -277,7 +382,10 @@ def test_manifest_and_asset_contract_pass_backend_validation():
     assert "manage_emulator" in keys
     assert "stop_emulator_after_run" in keys
     assert "app_ready_timeout_sec" in keys
+    fields = {field.key: field for field in manifest.fields}
+    assert fields["captcha_max_images"].default == 30
     assert (ASSETS_DIR / "ui" / "my-logged-out-header.png").is_file()
+    assert (ASSETS_DIR / "ui" / "task-signed-first-day.png").is_file()
     assert len(list((ASSETS_DIR / "operators" / "multiply").glob("*.png"))) >= 8
     assert len(list((ASSETS_DIR / "operators" / "other").glob("*.png"))) >= 8
 
@@ -286,6 +394,121 @@ def test_adb_serial_is_fail_closed():
     main = load_main()
     with pytest.raises(main.ScriptError, match="emulator-6554"):
         main.AdbClient("adb", "unexpected-device", logging.getLogger("test"))
+
+
+def test_launch_app_uses_non_blocking_activity_start(monkeypatch):
+    main = load_main()
+
+    class FakeAdb:
+        def __init__(self):
+            self.calls: list[tuple[tuple[str, ...], dict]] = []
+
+        def run(self, *args, **kwargs):
+            self.calls.append((args, kwargs))
+            stdout = "" if args[:4] != ("shell", "dumpsys", "activity", "activities") else "no resumed app"
+            return subprocess.CompletedProcess(args, 0, stdout, "")
+
+    monkeypatch.setattr(main.time, "sleep", lambda _value: None)
+    adb = FakeAdb()
+    main._launch_app(adb)
+
+    start_args, start_kwargs = adb.calls[1]
+    assert start_args[:3] == ("shell", "am", "start")
+    assert "-W" not in start_args
+    assert start_kwargs["timeout"] == 30
+
+
+def test_captcha_auto_refresh_at_last_slot_keeps_retry_budget(monkeypatch):
+    main = load_main()
+
+    class FakeAdb:
+        def __init__(self):
+            self.taps: list[tuple[int, int]] = []
+            self.typed: list[str] = []
+
+        def tap(self, x: int, y: int) -> None:
+            self.taps.append((x, y))
+
+        def select_all(self) -> None:
+            pass
+
+        def type_text(self, value: str) -> None:
+            self.typed.append(value)
+
+        def screenshot(self) -> bytes:
+            return b"before-submit"
+
+    class FakeWorker:
+        def __init__(self):
+            self.captcha = iter(
+                [
+                    {
+                        "accepted": False,
+                        "reason": "low",
+                        "confidence": 0.0,
+                        "formula_fingerprint": f"low-{index}",
+                    }
+                    for index in range(3)
+                ]
+                + [
+                    {
+                        "accepted": True,
+                        "answer": "21",
+                        "expression": "3*7",
+                        "confidence": 0.8,
+                        "formula_fingerprint": "stale",
+                    },
+                    {
+                        "accepted": True,
+                        "answer": "32",
+                        "expression": "4*8",
+                        "confidence": 0.8,
+                        "formula_fingerprint": "fresh",
+                    },
+                ]
+            )
+            self.fingerprints = iter(["auto-refreshed", "fresh"])
+
+        def request(self, mode: str, _image: bytes, **_kwargs):
+            if mode == "captcha":
+                return next(self.captcha)
+            if mode == "fingerprint":
+                return {"formula_fingerprint": next(self.fingerprints)}
+            raise AssertionError(mode)
+
+    monkeypatch.setattr(main.time, "sleep", lambda _value: None)
+    monkeypatch.setattr(main, "_ensure_email_form", lambda *_args: None)
+    monkeypatch.setattr(main, "_fill_credentials", lambda *_args: None)
+    monkeypatch.setattr(main, "_open_captcha", lambda *_args: b"captcha")
+    monkeypatch.setattr(
+        main,
+        "_wait_changed_captcha",
+        lambda *_args: (b"next-captcha", {}),
+    )
+    monkeypatch.setattr(
+        main,
+        "_wait_login_outcome",
+        lambda *_args, **_kwargs: ("my_logged_in", {}),
+    )
+
+    adb = FakeAdb()
+    result = main._login_with_captcha(
+        adb,
+        FakeWorker(),
+        {
+            "account": "person@example.com",
+            "password": "password1",
+            "captcha_max_images": 4,
+            "captcha_refresh_interval_sec": 5,
+        },
+        logging.getLogger("test"),
+    )
+
+    assert result["logged_in"] is True
+    assert result["captcha_images"] == 4
+    assert result["captcha_stale_retries"] == 1
+    assert result["captcha_submissions"] == 1
+    assert adb.typed == ["21", "32"]
 
 
 def test_profile_signature_is_stable_and_changes_with_glyphs():
@@ -346,6 +569,7 @@ def test_account_rebind_reset_clears_app_data_marker_and_syncs():
     class FakeAdb:
         def __init__(self):
             self.calls: list[tuple[str, ...]] = []
+            self.logger = logging.getLogger("test")
 
         def run(self, *args, **_kwargs):
             self.calls.append(args)
@@ -380,6 +604,8 @@ def test_account_rebind_reset_stops_if_pm_clear_fails():
     main = load_main()
 
     class FakeAdb:
+        logger = logging.getLogger("test")
+
         def run(self, *args, **_kwargs):
             if args[:3] == ("shell", "pm", "clear"):
                 return subprocess.CompletedProcess(args, 1, "Failed\n", "")

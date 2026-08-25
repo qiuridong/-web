@@ -190,7 +190,9 @@ def inspect_ui(frame: np.ndarray, assets_dir: Path) -> dict[str, Any]:
     task_nav_path = ui_dir / "task-nav.png"
     task_layout_path = ui_dir / "task-layout.png"
     task_ready_path = ui_dir / "task-ready-top.png"
-    task_signed_path = ui_dir / "task-signed-top.png"
+    # “已签到”页顶部是账户可变的金币余额，不能作为状态模板。
+    # 改为只比较第一天奖励圆内的勾选标记，该区域与账户余额无关。
+    task_signed_path = ui_dir / "task-signed-first-day.png"
     task_paths = (
         task_nav_path,
         task_layout_path,
@@ -208,7 +210,7 @@ def inspect_ui(frame: np.ndarray, assets_dir: Path) -> dict[str, Any]:
             frame[145:345, 250:470], _load_rgb(task_ready_path)
         )
         signed_score = _fixed_similarity(
-            frame[145:345, 250:470], _load_rgb(task_signed_path)
+            frame[462:507, 65:110], _load_rgb(task_signed_path)
         )
         success_panel = frame[590:862, 85:635]
         if (
