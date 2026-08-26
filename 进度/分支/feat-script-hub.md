@@ -49,7 +49,7 @@
 
 ### 本分支上的其它功能（非货架）
 
-- [x] **📱 动漫共和国 v1.2.3 按需 Emulator + 管家自动换绑** — v1.2.0 已完成 systemd 冷启动/自动关机、全局锁和身份绑定，run `46` 真实闭环；2026-08-25 完成单账户面板改密后自动换绑，run `56` 真实登录新账户，run `57` 复用持久会话并成功识别今日已签到
+- [x] **📱 动漫共和国 v1.2.4 按需 Emulator + 管家自动换绑** — v1.2.0 已完成 systemd 冷启动/自动关机、全局锁和身份绑定，run `46` 真实闭环；2026-08-25 完成单账户面板改密后自动换绑，run `56` 真实登录新账户；2026-08-26 修复已签到页 ready/signed 同分误判，真实管家 run `66` 成功并自动关机
 
 ---
 
@@ -88,11 +88,15 @@
 | 2026-08-25 | v1.2.1 主面板扫描 + UK Agent 同步 | ✅ `updated=1 errors=0` / bundle `2b550096…` / 实例原账号与 Emulator 均未改动 |
 | 2026-08-25 | 动漫共和国 v1.2.3 完整 OCR/UI 回归 + Ruff + 双端 sandbox + 主/seed 一致性 | ✅ `45 passed` / All checks passed / 两端 dry-run success / 38×2 文件一致 |
 | 2026-08-25 | 换号真实验收 run `56` / v1.2.3 生产闭环 run `57` | ✅ 新账户登录+绑定持久 / `success` / `already_logged_in=true` / `already_checked_in=true` / Emulator 已自动关闭 |
+| 2026-08-26 | v1.2.4 UI 分类回归 + run `65` 生产失败帧重放 | ✅ 9 个固定界面分类不回归 / `ready=1.0 signed=1.0` 正确返回 `task_signed` / Ruff + compileall 通过 |
+| 2026-08-26 | v1.2.4 面板扫描、Agent 同步与真实管家 run `66` | ✅ `updated=1 errors=0` / bundle `019df118…` / `success` / 绑定核验通过 / Emulator 自动关闭 |
 | — | install/migrate VPS 实测 | ⏳ M4 |
 
 ---
 
 ## 最近迭代（倒序）
+
+- 2026-08-26（✅ **动漫共和国 v1.2.4 修复管家连续失败，真实 Agent run `66` 闭环通过**）先读面板 SQLite 和 UK Agent 日志：scheduled run `59`、manual run `60` 都在任务页报 `last=unknown`，run `64` 在从当前页恢复到“我的”时同样得到 unknown。随后不再 SSH 直跑脚本，而由面板 service 创建 run `65`、Agent poll 领取；外部只读逐帧记录证明 App 冷启动、公告关闭、`home → my_logged_in → task` 导航都正常，失败页实际已有首日勾选，但分类分数连续为 `nav≈1.000/layout≈0.998/ready=1.000/signed=1.000`。v1.2.3 要求某一状态严格大于另一个，平分必落入 unknown；顶部“签到”按钮在签到前后本就不变，因此测试漏掉了真实边界。v1.2.4 改成首日勾选这一更具体证据优先，保留待签到和成功弹窗的原前置条件；新增平分回归。UK OCR runtime 的 9 张固定 UI 样本全部不回归，run `65` 生产帧由 unknown 改判 `task_signed`，本地 `19 passed + 27 dependency skips`、Ruff/compileall 通过。部署前脚本/SQLite 已备份，面板扫描 `updated=1 errors=0`，Agent 同步 bundle `019df118…`。**由面板创建的 run `66` 最终 `success`：已登录、账号绑定通过、今日已签到，93.399 秒结束并在 1.873 秒内关闭 Emulator，终态 unit inactive、无 QEMU 残留。**当前 `random_delay_sec=0`，scheduled/manual 没有环境差异；下一自然 scheduled 验证点为 2026-08-27 08:20。详见 [变更/2026-08-26-动漫共和国管家连续失败与v1.2.4修复.md](../变更/2026-08-26-动漫共和国管家连续失败与v1.2.4修复.md)。
 
 - 2026-08-25（✅ **动漫共和国换号登录与签到状态已修复，v1.2.3 生产闭环通过**）从用户改密后的生产 run `48`～`56` 重建时间线：`pm clear` 后 `am start -W` 把 arm64 App 长初始化误当失败；延迟公告/Flutter 首次触摸丢失没有导航恢复；高置信验证码在第 18 张输入期间自动换图，旧循环安全放弃过期答案却同时用尽预算；v1.2.2 修复这三处后，run `56` 在第 20 张临界换图后保留预算重试，**新账户真实登录成功并写入新 AVD/账号/昵称字形绑定**。run `56` 最后的失败只是旧“已签到”模板包含账户可变的金币余额，换号后固定模板分数约 0.400，把明确有首日勾选的页面判为 `unknown`。v1.2.3 改用与余额无关的 45×45 首日勾选 ROI，并新增任务底栏有界恢复状态机；生产回放分数 `nav≈1.000/layout≈0.998/signed=1.000`。完整 OCR/UI 回归 `45 passed`、backend venv `19 passed`+预期 OCR skip、Ruff/py_compile/主 seed 38 文件一致全绿；面板扫描 `updated=1 errors=0`，UK Agent bundle `1b488d49…` ack 完成。**生产 run `57` 最终 `success`：`already_logged_in=true`、`account_binding_verified=true`、`already_checked_in=true`、`checkin_action_enabled=true`**，87.378 秒内完成并自动关闭 Emulator，unit 终态 `inactive/dead`。下一个未签到日只需自然观察实际点击路径，不为重演而清 App 数据。详见 [变更/2026-08-25-动漫共和国换号登录与签到状态修复.md](../变更/2026-08-25-动漫共和国换号登录与签到状态修复.md)。
 

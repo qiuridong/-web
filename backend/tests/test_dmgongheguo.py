@@ -168,6 +168,26 @@ def test_task_signed_classifier_ignores_variable_balance():
     assert result["scores"]["signed"] >= 0.90
 
 
+def test_task_signed_wins_when_ready_banner_also_matches_exactly():
+    """Prefer signed evidence when ready and signed templates both match exactly."""
+
+    solver = load_solver()
+    np = pytest.importorskip("numpy")
+    image_module = pytest.importorskip("PIL.Image")
+
+    with image_module.open(UI_FIXTURES / "task-signed.png") as source:
+        frame = np.asarray(source.convert("RGB")).copy()
+    with image_module.open(ASSETS_DIR / "ui" / "task-ready-top.png") as source:
+        ready_banner = np.asarray(source.convert("RGB"))
+    frame[145:345, 250:470] = ready_banner
+
+    result = solver.inspect_ui(frame, ASSETS_DIR)
+
+    assert result["scores"]["ready"] >= 0.999
+    assert result["scores"]["signed"] >= 0.90
+    assert result["surface"] == "task_signed"
+
+
 def test_unknown_login_mode_can_recover_to_email(monkeypatch):
     main = load_main()
 
@@ -373,7 +393,7 @@ def test_manifest_and_asset_contract_pass_backend_validation():
 
     manifest = parse_manifest(MANIFEST_PATH)
     assert manifest.slug == "dmgongheguo"
-    assert str(manifest.version) == "1.2.3"
+    assert str(manifest.version) == "1.2.4"
     assert manifest.default_timeout_sec == 1200
     keys = [field.key for field in manifest.fields]
     assert keys[:2] == ["account", "password"]

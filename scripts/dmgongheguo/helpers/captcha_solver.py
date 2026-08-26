@@ -223,12 +223,15 @@ def inspect_ui(frame: np.ndarray, assets_dir: Path) -> dict[str, Any]:
                 "confidence": min(task_nav_score, signed_score),
             }
         if task_nav_score >= 0.90 and task_layout_score >= 0.94:
-            if ready_score >= 0.88 and ready_score > signed_score:
-                surface = "task_ready"
-                state_score = ready_score
-            elif signed_score >= 0.88 and signed_score > ready_score:
+            # 顶部“签到”圆形按钮在签到前后保持不变，生产页面会同时得到
+            # ready=1.0 与 signed=1.0。已签到勾选是更具体的状态证据，必须
+            # 优先于仅证明“位于任务页”的顶部按钮；否则平分会落到 unknown。
+            if signed_score >= 0.88:
                 surface = "task_signed"
                 state_score = signed_score
+            elif ready_score >= 0.88:
+                surface = "task_ready"
+                state_score = ready_score
             else:
                 surface = "unknown"
                 state_score = 0.0
