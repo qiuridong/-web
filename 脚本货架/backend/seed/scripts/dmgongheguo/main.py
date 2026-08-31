@@ -1,6 +1,6 @@
 """动漫共和国每日签到：ADB + 登录保活 + 本地验证码识别。
 
-1.2.4 修复已签到页 ready/signed 模板同分时被判为 unknown。
+1.2.5 修复换号清数据后的旧画面缓存、ADB 冷启动瞬时超时与公告丢触摸。
 验证码识别器只提交高置信乘法题，加/减/除法和不完整 token 链全部刷新。
 """
 
@@ -178,6 +178,8 @@ def _reset_app_for_account_rebind(adb: AdbClient) -> None:
         "shell",
         "pm",
         "clear",
+        "--user",
+        "current",
         PACKAGE,
         timeout=45,
         check=False,
@@ -197,6 +199,11 @@ def _reset_app_for_account_rebind(adb: AdbClient) -> None:
     adb.run("shell", "sync", timeout=20, sensitive=True)
     if _read_account_binding(adb) is not None:
         raise ScriptError("清理后旧账户绑定标记仍然存在，已停止自动换绑")
+    # ``pm clear`` 返回 Success 时，旧 Activity 的最后一帧仍可能短暂留在
+    # framebuffer / dumpsys activity 中。先切回 HOME，避免后续启动检测把这张
+    # 旧的“已登录”画面当成清理后的真实状态；新 App 随后会被强制重新启动。
+    adb.key("3")
+    time.sleep(1.0)
     adb.logger.info("自动换绑：旧账户绑定标记已清理并落盘")
 
 
@@ -599,29 +606,27 @@ def _check_environment(adb: AdbClient) -> dict[str, Any]:
     }
 
 
-def _launch_app(adb: AdbClient) -> None:
+def _launch_app(adb: AdbClient, *, force: bool = False) -> None:
     activities = adb.run("shell", "dumpsys", "activity", "activities", timeout=25).stdout
     resumed = next(
         (line for line in activities.splitlines() if "topResumedActivity=" in line),
         "",
     )
-    if PACKAGE in resumed and (
+    if not force and PACKAGE in resumed and (
         MAIN_ACTIVITY in resumed or SPLASH_ACTIVITY in resumed
     ):
         # 专用模拟器保留 App 进程。不要每天 force-stop：这个 arm64 App 在 x86
         # NDK translation 下冷初始化约 90 秒，还会让 owner 多用户会话一起抖动。
         return
 
-    adb.run(
-        "shell",
-        "am",
-        "start",
-        "--user",
-        "current",
-        "-n",
-        f"{PACKAGE}/{SPLASH_ACTIVITY}",
-        timeout=30,
+    command = ["shell", "am", "start"]
+    if force:
+        # ``-S`` 先停止目标包再启动，绕过 pm clear 后短暂残留的 Activity 记录。
+        command.append("-S")
+    command.extend(
+        ["--user", "current", "-n", f"{PACKAGE}/{SPLASH_ACTIVITY}"]
     )
+    adb.run(*command, timeout=30)
     # ``am start -W`` 会一直等 Activity 完成启动。pm clear 后的 arm64 App 在
     # x86 NDK translation 下可能初始化 160 秒以上，命令超时并不表示启动失败。
     # 改为非阻塞启动，把完整就绪判断统一交给 _dismiss_announcements 的截图状态机。
@@ -633,18 +638,40 @@ def _dismiss_announcements(
     worker: OcrWorker,
     *,
     timeout: int = 240,
+    stale_surface: str | None = None,
+    stale_grace_sec: float = 15.0,
 ) -> int:
     closed = 0
     started_at = time.monotonic()
     deadline = started_at + timeout
     next_progress_log = started_at + 30
+    last_logged_surface = ""
+    stale_logged = False
     while time.monotonic() < deadline:
         png = adb.screenshot()
-        surface = str(worker.request("ui", png).get("surface"))
+        evidence = worker.request("ui", png)
+        surface = str(evidence.get("surface"))
+        if surface != last_logged_surface:
+            _log_ui_evidence(adb, "app_ready", evidence)
+            last_logged_surface = surface
+        elapsed = time.monotonic() - started_at
+        if (
+            stale_surface
+            and surface == stale_surface
+            and elapsed < stale_grace_sec
+        ):
+            if not stale_logged:
+                adb.logger.info(
+                    "自动换绑：忽略清数据后短暂残留的旧界面 surface=%s",
+                    surface,
+                )
+                stale_logged = True
+            time.sleep(1.5)
+            continue
         if surface == "announcement":
-            if closed >= 3:
-                raise ScriptError("公告弹窗超过 3 个，按 fail-closed 停止")
-            adb.tap(435, 1018)
+            if closed >= 9:
+                raise ScriptError("公告关闭连续重试超过安全上限")
+            _close_announcement(adb, closed)
             closed += 1
             time.sleep(2.5)
             continue
@@ -660,21 +687,55 @@ def _dismiss_announcements(
     raise ScriptError(f"App 启动后 {timeout} 秒仍处于未知界面")
 
 
+def _log_ui_evidence(adb: AdbClient, phase: str, evidence: dict[str, Any]) -> None:
+    """只记录不含账号/截图的分类证据，便于直接从管家日志复盘。"""
+
+    logger = getattr(adb, "logger", None)
+    if logger is None:
+        return
+    surface = str(evidence.get("surface") or "unknown")
+    confidence = evidence.get("confidence")
+    scores = evidence.get("scores")
+    logger.info(
+        "UI 状态 phase=%s surface=%s confidence=%s scores=%s",
+        phase,
+        surface,
+        f"{float(confidence):.3f}" if isinstance(confidence, (int, float)) else "-",
+        json.dumps(scores, ensure_ascii=True, sort_keys=True)
+        if isinstance(scores, dict)
+        else "-",
+    )
+
+
+def _close_announcement(adb: AdbClient, attempt: int) -> None:
+    """点击已确认的公告按钮；连续丢触摸时每第三次用 BACK 作安全兜底。"""
+
+    if (attempt + 1) % 3 == 0:
+        adb.logger.info("公告关闭按钮连续丢触摸，改用 BACK 关闭当前弹窗")
+        adb.key("4")
+    else:
+        adb.tap(435, 1018)
+
+
 def _navigate_my(
     adb: AdbClient, worker: OcrWorker
 ) -> tuple[str, dict[str, Any], bytes]:
     """从已知安全界面有界恢复到“我的”，容忍延迟公告和一次丢触摸。"""
 
-    deadline = time.monotonic() + 45
+    deadline = time.monotonic() + 75
     back_presses = 0
-    announcement_taps = 0
+    announcement_streak = 0
     nav_taps = 0
     last_surface = "unknown"
+    last_logged_surface = ""
     while time.monotonic() < deadline:
         png = adb.screenshot()
         evidence = worker.request("ui", png)
         surface = str(evidence.get("surface"))
         last_surface = surface
+        if surface != last_logged_surface:
+            _log_ui_evidence(adb, "navigate_my", evidence)
+            last_logged_surface = surface
         if surface in {"my_logged_in", "my_logged_out"}:
             return surface, evidence, png
 
@@ -688,12 +749,13 @@ def _navigate_my(
         # 导航阶段会把“我的”点击落在遮罩层后。这里只点击已被分类器确认的
         # 公告关闭坐标，并给触摸丢失留下重试预算。
         if surface == "announcement":
-            if announcement_taps >= 6:
+            if announcement_streak >= 9:
                 raise ScriptError("导航期间公告关闭重试超过安全上限")
-            adb.tap(435, 1018)
-            announcement_taps += 1
+            _close_announcement(adb, announcement_streak)
+            announcement_streak += 1
             time.sleep(2.5)
             continue
+        announcement_streak = 0
 
         if surface == "task_success_dialog":
             adb.key("4")
@@ -960,25 +1022,30 @@ def _navigate_task(
 ) -> tuple[str, dict[str, Any], bytes]:
     """从已知安全界面有界进入任务中心，容忍延迟公告和丢触摸。"""
 
-    deadline = time.monotonic() + 45
-    announcement_taps = 0
+    deadline = time.monotonic() + 75
+    announcement_streak = 0
     nav_taps = 0
     last_surface = "unknown"
+    last_logged_surface = ""
     while time.monotonic() < deadline:
         png = adb.screenshot()
         evidence = worker.request("ui", png)
         surface = str(evidence.get("surface"))
         last_surface = surface
+        if surface != last_logged_surface:
+            _log_ui_evidence(adb, "navigate_task", evidence)
+            last_logged_surface = surface
         if surface in {"task_ready", "task_signed", "task_success_dialog"}:
             return surface, evidence, png
 
         if surface == "announcement":
-            if announcement_taps >= 6:
+            if announcement_streak >= 9:
                 raise ScriptError("任务导航期间公告关闭重试超过安全上限")
-            adb.tap(435, 1018)
-            announcement_taps += 1
+            _close_announcement(adb, announcement_streak)
+            announcement_streak += 1
             time.sleep(2.5)
             continue
+        announcement_streak = 0
 
         # 任务底栏在首页和已登录“我的”页都是固定安全坐标。
         # Flutter 页面初始化可能吞掉首次点击，因此只在这两种已知
@@ -1133,9 +1200,12 @@ def run(config: dict[str, Any], context: Any) -> RunResult:
                         account_rebind_attempted = True
                         _reset_app_for_account_rebind(adb)
                         binding = None
-                        _launch_app(adb)
+                        _launch_app(adb, force=True)
                         closed += _dismiss_announcements(
-                            adb, worker, timeout=app_ready_timeout
+                            adb,
+                            worker,
+                            timeout=app_ready_timeout,
+                            stale_surface=surface,
                         )
                         surface, login_evidence, my_png = _navigate_my(
                             adb, worker

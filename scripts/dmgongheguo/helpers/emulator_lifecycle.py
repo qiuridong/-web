@@ -231,24 +231,44 @@ class EmulatorLifecycle:
         deadline = time.monotonic() + self.start_timeout
         last_state = "absent"
         last_boot = ""
+        adb_timeout_count = 0
         while time.monotonic() < deadline:
-            last_state = self._device_state()
-            if last_state == "device":
-                actual_avd = self._actual_avd_name()
-                if actual_avd != self.avd_name:
-                    raise EmulatorLifecycleError(
-                        f"ADB {self.serial} 实际 AVD={actual_avd!r}，"
-                        f"期望 {self.avd_name!r}"
+            try:
+                last_state = self._device_state()
+                if last_state == "device":
+                    actual_avd = self._actual_avd_name()
+                    if actual_avd != self.avd_name:
+                        raise EmulatorLifecycleError(
+                            f"ADB {self.serial} 实际 AVD={actual_avd!r}，"
+                            f"期望 {self.avd_name!r}"
+                        )
+                    boot = self._adb(
+                        "shell", "getprop", "sys.boot_completed", timeout=8
                     )
-                boot = self._adb(
-                    "shell", "getprop", "sys.boot_completed", timeout=8
-                )
-                last_boot = boot.stdout.strip() if boot.returncode == 0 else ""
-                if last_boot == "1":
-                    self._adb(
-                        "shell", "input", "keyevent", "82", timeout=8, check=False
+                    last_boot = boot.stdout.strip() if boot.returncode == 0 else ""
+                    if last_boot == "1":
+                        self._adb(
+                            "shell",
+                            "input",
+                            "keyevent",
+                            "82",
+                            timeout=8,
+                            check=False,
+                        )
+                        return
+            except EmulatorLifecycleError as exc:
+                # Emulator 启动早期 ADB server 偶发一次 get-state / emu / getprop
+                # 超时。旧逻辑会立即终止整轮；只对明确的 TimeoutExpired 在总
+                # start_timeout 内重试，其它身份/命令错误仍保持 fail-closed。
+                if not isinstance(exc.__cause__, subprocess.TimeoutExpired):
+                    raise
+                adb_timeout_count += 1
+                last_state = "adb-timeout"
+                if adb_timeout_count == 1 or adb_timeout_count % 3 == 0:
+                    self.logger.warning(
+                        "Emulator 冷启动期间 ADB 瞬时超时，第 %d 次；继续在总启动预算内等待",
+                        adb_timeout_count,
                     )
-                    return
             if self.started_by_run and not self._unit_active():
                 status = self._systemctl(
                     "status", self.unit, "--no-pager", "-l", timeout=10

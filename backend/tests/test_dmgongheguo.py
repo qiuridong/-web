@@ -262,6 +262,56 @@ def test_navigate_my_retries_lost_tap_and_closes_delayed_announcement(
     assert adb.taps == [(630, 1210), (435, 1018), (630, 1210)]
 
 
+def test_post_rebind_ready_wait_ignores_stale_logged_in_frame(monkeypatch):
+    main = load_main()
+
+    class Clock:
+        value = 0.0
+
+        def monotonic(self) -> float:
+            return self.value
+
+        def sleep(self, seconds: float) -> None:
+            self.value += seconds
+
+    class FakeAdb:
+        logger = logging.getLogger("test")
+
+        def screenshot(self) -> bytes:
+            return b"fixture"
+
+        def tap(self, _x: int, _y: int) -> None:
+            raise AssertionError("stale frame must not be clicked")
+
+    class FakeWorker:
+        def __init__(self):
+            self.responses = iter(
+                [
+                    {"surface": "my_logged_in", "confidence": 0.99},
+                    {"surface": "unknown", "confidence": 0.0},
+                    {"surface": "home", "confidence": 0.98},
+                ]
+            )
+
+        def request(self, mode: str, image: bytes):
+            assert mode == "ui" and image == b"fixture"
+            return next(self.responses)
+
+    clock = Clock()
+    monkeypatch.setattr(main.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(main.time, "sleep", clock.sleep)
+
+    closed = main._dismiss_announcements(
+        FakeAdb(),
+        FakeWorker(),
+        timeout=30,
+        stale_surface="my_logged_in",
+        stale_grace_sec=15,
+    )
+
+    assert closed == 0
+
+
 def test_dry_run_short_circuits_before_adb_or_ocr():
     main = load_main()
 
@@ -393,7 +443,7 @@ def test_manifest_and_asset_contract_pass_backend_validation():
 
     manifest = parse_manifest(MANIFEST_PATH)
     assert manifest.slug == "dmgongheguo"
-    assert str(manifest.version) == "1.2.4"
+    assert str(manifest.version) == "1.2.5"
     assert manifest.default_timeout_sec == 1200
     keys = [field.key for field in manifest.fields]
     assert keys[:2] == ["account", "password"]
@@ -434,6 +484,35 @@ def test_launch_app_uses_non_blocking_activity_start(monkeypatch):
 
     start_args, start_kwargs = adb.calls[1]
     assert start_args[:3] == ("shell", "am", "start")
+    assert "-W" not in start_args
+    assert start_kwargs["timeout"] == 30
+
+
+def test_forced_launch_bypasses_stale_resumed_activity(monkeypatch):
+    main = load_main()
+
+    class FakeAdb:
+        def __init__(self):
+            self.calls: list[tuple[tuple[str, ...], dict]] = []
+
+        def run(self, *args, **kwargs):
+            self.calls.append((args, kwargs))
+            if args[:4] == ("shell", "dumpsys", "activity", "activities"):
+                stdout = (
+                    "topResumedActivity=ActivityRecord{stale u0 "
+                    f"{main.PACKAGE}/{main.MAIN_ACTIVITY}}}"
+                )
+            else:
+                stdout = ""
+            return subprocess.CompletedProcess(args, 0, stdout, "")
+
+    monkeypatch.setattr(main.time, "sleep", lambda _value: None)
+    adb = FakeAdb()
+    main._launch_app(adb, force=True)
+
+    start_args, start_kwargs = adb.calls[1]
+    assert start_args[:4] == ("shell", "am", "start", "-S")
+    assert "--user" in start_args
     assert "-W" not in start_args
     assert start_kwargs["timeout"] == 30
 
@@ -583,12 +662,13 @@ def test_account_change_is_distinct_from_avd_binding_corruption():
         main._validate_binding_container(binding, wrong_avd)
 
 
-def test_account_rebind_reset_clears_app_data_marker_and_syncs():
+def test_account_rebind_reset_clears_app_data_marker_and_syncs(monkeypatch):
     main = load_main()
 
     class FakeAdb:
         def __init__(self):
             self.calls: list[tuple[str, ...]] = []
+            self.keys: list[str] = []
             self.logger = logging.getLogger("test")
 
         def run(self, *args, **_kwargs):
@@ -601,6 +681,10 @@ def test_account_rebind_reset_clears_app_data_marker_and_syncs():
                 )
             return subprocess.CompletedProcess(args, 0, "", "")
 
+        def key(self, value: str) -> None:
+            self.keys.append(value)
+
+    monkeypatch.setattr(main.time, "sleep", lambda _value: None)
     adb = FakeAdb()
     main._reset_app_for_account_rebind(adb)
 
@@ -610,7 +694,14 @@ def test_account_rebind_reset_clears_app_data_marker_and_syncs():
         "force-stop",
         main.PACKAGE,
     ) in adb.calls
-    assert ("shell", "pm", "clear", main.PACKAGE) in adb.calls
+    assert (
+        "shell",
+        "pm",
+        "clear",
+        "--user",
+        "current",
+        main.PACKAGE,
+    ) in adb.calls
     assert (
         "shell",
         "rm",
@@ -618,6 +709,7 @@ def test_account_rebind_reset_clears_app_data_marker_and_syncs():
         main.ACCOUNT_BINDING_PATH,
     ) in adb.calls
     assert ("shell", "sync") in adb.calls
+    assert adb.keys == ["3"]
 
 
 def test_account_rebind_reset_stops_if_pm_clear_fails():
@@ -636,7 +728,7 @@ def test_account_rebind_reset_stops_if_pm_clear_fails():
 
 
 def test_emulator_lifecycle_starts_expected_systemd_unit(monkeypatch):
-    from helpers.emulator_lifecycle import EmulatorLifecycle
+    from helpers.emulator_lifecycle import EmulatorLifecycle, EmulatorLifecycleError
 
     lifecycle = EmulatorLifecycle(
         adb_path="/sdk/adb",
@@ -649,10 +741,19 @@ def test_emulator_lifecycle_starts_expected_systemd_unit(monkeypatch):
         stop_after_run=True,
         systemctl_path="/bin/systemctl",
     )
-    states = iter(["absent", "device"])
+    transient_timeout = EmulatorLifecycleError("命令执行失败 adb: TimeoutExpired")
+    transient_timeout.__cause__ = subprocess.TimeoutExpired(["adb"], 6)
+    states = iter(["absent", transient_timeout, "device"])
     systemctl_calls: list[tuple[str, ...]] = []
     adb_calls: list[tuple[str, ...]] = []
-    monkeypatch.setattr(lifecycle, "_device_state", lambda: next(states))
+
+    def fake_device_state():
+        value = next(states)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    monkeypatch.setattr(lifecycle, "_device_state", fake_device_state)
     monkeypatch.setattr(lifecycle, "_verify_unit_loaded", lambda: None)
     monkeypatch.setattr(lifecycle, "_actual_avd_name", lambda: "poc34")
     monkeypatch.setattr(lifecycle, "_unit_active", lambda: True)
@@ -811,7 +912,11 @@ def test_changed_panel_account_is_rebound_once_then_checkin_runs(
     monkeypatch.setattr(main, "_check_environment", lambda _adb: {})
     monkeypatch.setattr(main, "_read_account_binding", lambda _adb: old_binding)
     monkeypatch.setattr(main, "OcrWorker", FakeWorker)
-    monkeypatch.setattr(main, "_launch_app", lambda _adb: launches.append(True))
+    monkeypatch.setattr(
+        main,
+        "_launch_app",
+        lambda _adb, *, force=False: launches.append(force),
+    )
     monkeypatch.setattr(
         main, "_dismiss_announcements", lambda *_args, **_kwargs: 1
     )
@@ -879,7 +984,7 @@ def test_changed_panel_account_is_rebound_once_then_checkin_runs(
     assert result.data["already_logged_in"] is False
     assert result.data["announcements_closed"] == 2
     assert result.data["emulator"]["stopped"] is True
-    assert len(launches) == 2
+    assert launches == [False, True]
     assert resets == [True]
     assert written[0][0]["account_sha256"] == main._account_hash(
         "second@example.com"
