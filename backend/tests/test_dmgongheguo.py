@@ -151,15 +151,15 @@ def test_ui_classifier_uses_fixed_safe_surfaces():
             assert result["login_mode"] == mode
 
 
-def test_task_signed_classifier_ignores_variable_balance():
+def test_task_signed_visual_candidate_ignores_variable_balance():
     solver = load_solver()
     np = pytest.importorskip("numpy")
     image_module = pytest.importorskip("PIL.Image")
 
     with image_module.open(UI_FIXTURES / "task-signed.png") as source:
         frame = np.asarray(source.convert("RGB")).copy()
-    # 旧模板把这个账户可变的余额区域当成已签到依据。
-    # 覆盖它模拟换账户; 首日勾选标记仍应独立判定成功。
+    # 视觉层只把它识别为已签到候选; 主流程还必须通过 accessibility
+    # 的“金币”语义证据才能最终返回今天已签到。
     frame[145:345, 250:470] = frame[145, 250]
 
     result = solver.inspect_ui(frame, ASSETS_DIR)
@@ -168,8 +168,8 @@ def test_task_signed_classifier_ignores_variable_balance():
     assert result["scores"]["signed"] >= 0.90
 
 
-def test_task_signed_wins_when_ready_banner_also_matches_exactly():
-    """Prefer signed evidence when ready and signed templates both match exactly."""
+def test_today_ready_wins_over_historical_first_day_tick():
+    """A historical reward tick must not override today's sign-in button."""
 
     solver = load_solver()
     np = pytest.importorskip("numpy")
@@ -185,7 +185,50 @@ def test_task_signed_wins_when_ready_banner_also_matches_exactly():
 
     assert result["scores"]["ready"] >= 0.999
     assert result["scores"]["signed"] >= 0.90
-    assert result["surface"] == "task_signed"
+    assert result["surface"] == "task_ready"
+
+
+def test_task_accessibility_identifies_today_ready_and_signed():
+    main = load_main()
+    ready_xml = """<hierarchy><node class="android.widget.Button"
+        content-desc="签到" clickable="true" bounds="[274,162][446,330]" />
+        <node class="android.view.View" content-desc="第1天"
+        clickable="false" bounds="[58,520][119,556]" />
+        <node class="android.widget.Button" content-desc="任务&#10;Tab 3 of 4"
+        selected="true" bounds="[360,1167][540,1269]" /></hierarchy>"""
+    signed_xml = """<hierarchy><node class="android.view.View"
+        content-desc="40" clickable="false" bounds="[327,185][393,267]" />
+        <node class="android.view.View" content-desc="金币"
+        clickable="false" bounds="[333,267][387,305]" /></hierarchy>"""
+    channel_xml = """<hierarchy><node class="android.widget.Button"
+        content-desc="频道&#10;Tab 2 of 4" selected="true"
+        bounds="[180,1167][360,1269]" /></hierarchy>"""
+
+    assert main._task_surface_from_accessibility(ready_xml) == {
+        "surface": "task_ready",
+        "proof": "accessibility_signin_button",
+        "selected_tab": "task",
+    }
+    assert main._task_surface_from_accessibility(signed_xml) == {
+        "surface": "task_signed",
+        "proof": "accessibility_coin_balance",
+        "selected_tab": "",
+    }
+    assert main._task_surface_from_accessibility(channel_xml)["selected_tab"] == (
+        "channel"
+    )
+
+
+def test_task_accessibility_rejects_historical_tick_without_today_state():
+    main = load_main()
+    historical_tick_only = """<hierarchy><node class="android.view.View"
+        content-desc="第1天" clickable="false"
+        bounds="[58,520][119,556]" /></hierarchy>"""
+
+    result = main._task_surface_from_accessibility(historical_tick_only)
+
+    assert result["surface"] == "unknown"
+    assert result["proof"] == "ambiguous_task_header"
 
 
 def test_unknown_login_mode_can_recover_to_email(monkeypatch):
@@ -354,6 +397,14 @@ def test_daily_checkin_is_idempotent_when_already_signed(monkeypatch):
             return next(self.responses)
 
     monkeypatch.setattr(main.time, "sleep", lambda _: None)
+    monkeypatch.setattr(
+        main,
+        "_wait_task_semantic_surface",
+        lambda _adb: (
+            "task_signed",
+            {"proof": "accessibility_coin_balance"},
+        ),
+    )
     adb = FakeAdb()
     result = main._perform_daily_checkin(adb, FakeWorker())
     assert result["already_checked_in"] is True
@@ -398,13 +449,62 @@ def test_navigate_task_retries_lost_tap_and_closes_delayed_announcement(
     assert adb.taps == [(450, 1210), (435, 1018), (450, 1210)]
 
 
-def test_daily_checkin_clicks_once_and_requires_postcondition(monkeypatch):
+def test_navigate_task_recovers_unknown_when_semantics_select_other_tab(
+    monkeypatch,
+):
+    main = load_main()
+
+    class FakeAdb:
+        def __init__(self):
+            self.taps: list[tuple[int, int]] = []
+            self.logger = logging.getLogger("dmgongheguo-test")
+
+        def tap(self, x: int, y: int) -> None:
+            self.taps.append((x, y))
+
+        def screenshot(self) -> bytes:
+            return b"fixture"
+
+    class FakeWorker:
+        def __init__(self):
+            self.responses = iter(
+                [
+                    {"surface": "my_logged_in", "confidence": 0.99},
+                    {"surface": "unknown", "confidence": 0.0},
+                    {"surface": "task_signed", "confidence": 0.99},
+                ]
+            )
+
+        def request(self, mode: str, image: bytes):
+            return next(self.responses)
+
+    monkeypatch.setattr(main.time, "sleep", lambda _: None)
+    monkeypatch.setattr(
+        main,
+        "_read_task_accessibility",
+        lambda _adb: {
+            "surface": "unknown",
+            "proof": "ambiguous_task_header",
+            "selected_tab": "channel",
+        },
+    )
+    adb = FakeAdb()
+    surface, _, _ = main._navigate_task(adb, FakeWorker())
+
+    assert surface == "task_signed"
+    assert adb.taps == [(450, 1210), (450, 1210)]
+
+
+def test_daily_checkin_overrides_historical_tick_and_requires_postcondition(
+    monkeypatch,
+):
     main = load_main()
 
     class FakeAdb:
         def __init__(self):
             self.taps: list[tuple[int, int]] = []
             self.keys: list[str] = []
+            self.logger = logging.getLogger("dmgongheguo-test")
 
         def tap(self, x: int, y: int) -> None:
             self.taps.append((x, y))
@@ -420,7 +520,9 @@ def test_daily_checkin_clicks_once_and_requires_postcondition(monkeypatch):
             self.responses = iter(
                 [
                     {"surface": "my_logged_in", "confidence": 0.99},
-                    {"surface": "task_ready", "confidence": 0.99},
+                    # 模拟 v1.2.5: 历史首日勾把仍有“签到”按钮的页面
+                    # 视觉误判成 task_signed; 语义证据必须把它纠正为待签到。
+                    {"surface": "task_signed", "confidence": 0.99},
                     {"surface": "task_success_dialog", "confidence": 0.99},
                     {"surface": "task_signed", "confidence": 0.99},
                 ]
@@ -429,7 +531,18 @@ def test_daily_checkin_clicks_once_and_requires_postcondition(monkeypatch):
         def request(self, mode: str, image: bytes):
             return next(self.responses)
 
+    semantic_states = iter(
+        [
+            ("task_ready", {"proof": "accessibility_signin_button"}),
+            ("task_signed", {"proof": "accessibility_coin_balance"}),
+        ]
+    )
     monkeypatch.setattr(main.time, "sleep", lambda _: None)
+    monkeypatch.setattr(
+        main,
+        "_wait_task_semantic_surface",
+        lambda _adb: next(semantic_states),
+    )
     adb = FakeAdb()
     result = main._perform_daily_checkin(adb, FakeWorker())
     assert result["already_checked_in"] is False
@@ -443,7 +556,7 @@ def test_manifest_and_asset_contract_pass_backend_validation():
 
     manifest = parse_manifest(MANIFEST_PATH)
     assert manifest.slug == "dmgongheguo"
-    assert str(manifest.version) == "1.2.5"
+    assert str(manifest.version) == "1.2.8"
     assert manifest.default_timeout_sec == 1200
     keys = [field.key for field in manifest.fields]
     assert keys[:2] == ["account", "password"]

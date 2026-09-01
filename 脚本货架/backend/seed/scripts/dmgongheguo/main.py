@@ -1,6 +1,6 @@
 """动漫共和国每日签到：ADB + 登录保活 + 本地验证码识别。
 
-1.2.5 修复换号清数据后的旧画面缓存、ADB 冷启动瞬时超时与公告丢触摸。
+1.2.8 修复历史勾选假成功，并从任一底栏页恢复偶发错位触摸。
 验证码识别器只提交高置信乘法题，加/减/除法和不完整 token 链全部刷新。
 """
 
@@ -19,6 +19,7 @@ import signal
 import shutil
 import subprocess
 import time
+import xml.etree.ElementTree as ET
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -50,6 +51,7 @@ OCR_REQUIREMENTS = (
 OCR_MARKER_VERSION = "dmgongheguo-ocr-v1"
 ACCOUNT_BINDING_PATH = "/data/local/tmp/.dmgongheguo-account-binding-v1.json"
 ACCOUNT_BINDING_SCHEMA = 1
+TASK_UI_HIERARCHY_PATH = "/data/local/tmp/.dmgongheguo-task-ui.xml"
 
 
 @dataclass
@@ -575,6 +577,139 @@ def _wait_surface(
     )
 
 
+def _node_in_task_header(node: ET.Element) -> bool:
+    """只接受任务页顶部状态区域，排除底栏和奖励说明里的同名文字。"""
+
+    match = re.fullmatch(
+        r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]",
+        str(node.attrib.get("bounds") or ""),
+    )
+    if match is None:
+        return False
+    left, top, right, bottom = (int(value) for value in match.groups())
+    return 180 <= left < right <= 540 and 120 <= top < bottom <= 360
+
+
+def _task_surface_from_accessibility(xml_text: str) -> dict[str, Any]:
+    """从 Flutter accessibility 语义树提取“今日待签/已签”的直接证据。"""
+
+    try:
+        root = ET.fromstring(xml_text)
+    except (ET.ParseError, TypeError, ValueError):
+        return {"surface": "unknown", "proof": "invalid_xml"}
+
+    nodes = list(root.iter("node"))
+    header_nodes = [node for node in nodes if _node_in_task_header(node)]
+    selected_tab = ""
+    tab_prefixes = {
+        "发现\n": "discover",
+        "频道\n": "channel",
+        "任务\n": "task",
+        "我的\n": "my",
+    }
+    for node in nodes:
+        if str(node.attrib.get("selected") or "").lower() != "true":
+            continue
+        description = str(node.attrib.get("content-desc") or "").strip()
+        for prefix, tab_name in tab_prefixes.items():
+            if description.startswith(prefix):
+                selected_tab = tab_name
+                break
+        if selected_tab:
+            break
+    ready = any(
+        str(node.attrib.get("content-desc") or "").strip() == "签到"
+        and (
+            str(node.attrib.get("clickable") or "").lower() == "true"
+            or str(node.attrib.get("class") or "").endswith("Button")
+        )
+        for node in header_nodes
+    )
+    coin_label = any(
+        str(node.attrib.get("content-desc") or "").strip() == "金币"
+        for node in header_nodes
+    )
+    coin_value = any(
+        re.fullmatch(
+            r"\d+", str(node.attrib.get("content-desc") or "").strip()
+        )
+        is not None
+        for node in header_nodes
+    )
+
+    if ready and not coin_label:
+        return {
+            "surface": "task_ready",
+            "proof": "accessibility_signin_button",
+            "selected_tab": selected_tab,
+        }
+    if coin_label and coin_value and not ready:
+        return {
+            "surface": "task_signed",
+            "proof": "accessibility_coin_balance",
+            "selected_tab": selected_tab,
+        }
+    return {
+        "surface": "unknown",
+        "proof": "ambiguous_task_header",
+        "selected_tab": selected_tab,
+    }
+
+
+def _read_task_accessibility(adb: AdbClient) -> dict[str, Any]:
+    """抓取一次语义树；失败只返回证据，不在导航状态机内直接抛错。"""
+
+    dumped = adb.run(
+        "shell",
+        "uiautomator",
+        "dump",
+        TASK_UI_HIERARCHY_PATH,
+        timeout=25,
+        check=False,
+        sensitive=True,
+    )
+    if dumped.returncode != 0:
+        return {"surface": "unknown", "proof": "dump_failed", "selected_tab": ""}
+    hierarchy = adb.run(
+        "shell",
+        "cat",
+        TASK_UI_HIERARCHY_PATH,
+        timeout=15,
+        check=False,
+        sensitive=True,
+    )
+    if hierarchy.returncode != 0:
+        return {"surface": "unknown", "proof": "read_failed", "selected_tab": ""}
+    return _task_surface_from_accessibility(hierarchy.stdout)
+
+
+def _wait_task_semantic_surface(
+    adb: AdbClient,
+    *,
+    timeout: float = 12,
+    interval: float = 1.0,
+) -> tuple[str, dict[str, Any]]:
+    """读取任务页语义树；没有直接证据时 fail-closed，不把历史勾选算成功。"""
+
+    deadline = time.monotonic() + timeout
+    last: dict[str, Any] = {"surface": "unknown", "proof": "not_read"}
+    while time.monotonic() < deadline:
+        last = _read_task_accessibility(adb)
+        surface = str(last.get("surface") or "unknown")
+        if surface in {"task_ready", "task_signed"}:
+            adb.logger.info(
+                "任务状态语义复核 surface=%s proof=%s",
+                surface,
+                last.get("proof"),
+            )
+            return surface, last
+        time.sleep(interval)
+    raise ScriptError(
+        "任务页缺少可核实的今日签到语义证据；"
+        f"last={last.get('proof', 'unknown')}"
+    )
+
+
 def _check_environment(adb: AdbClient) -> dict[str, Any]:
     state = adb.run("get-state").stdout.strip()
     boot = adb.run("shell", "getprop", "sys.boot_completed").stdout.strip()
@@ -765,7 +900,7 @@ def _navigate_my(
 
         # 只在确认底栏可见的固定界面点击“我的”。Flutter 首次全冷启动时
         # 第一次点击偶尔被页面初始化吞掉，因此允许有界重复。
-        if surface in {"home", "task_ready", "task_signed"}:
+        if surface in {"home", "task_ready", "task_signed", "task_page"}:
             if nav_taps >= 6:
                 raise ScriptError("“我的”底栏点击重试超过安全上限")
             adb.tap(630, 1210)
@@ -1025,6 +1160,7 @@ def _navigate_task(
     deadline = time.monotonic() + 75
     announcement_streak = 0
     nav_taps = 0
+    next_semantic_probe = 0.0
     last_surface = "unknown"
     last_logged_surface = ""
     while time.monotonic() < deadline:
@@ -1035,7 +1171,12 @@ def _navigate_task(
         if surface != last_logged_surface:
             _log_ui_evidence(adb, "navigate_task", evidence)
             last_logged_surface = surface
-        if surface in {"task_ready", "task_signed", "task_success_dialog"}:
+        if surface in {
+            "task_ready",
+            "task_signed",
+            "task_page",
+            "task_success_dialog",
+        }:
             return surface, evidence, png
 
         if surface == "announcement":
@@ -1061,51 +1202,102 @@ def _navigate_task(
         if surface == "my_logged_out":
             raise ScriptError("进入任务中心前登录态已失效")
 
+        # 管家 run 104 复现过一次：点击“任务”后视觉帧进入 unknown，旧状态机
+        # 因而不再重试，最终空等 75 秒。unknown 时不盲点；只有 accessibility
+        # 明确仍在任一非任务底栏页才重试，若任务页语义已出现则直接进入后续复核。
+        now = time.monotonic()
+        if surface == "unknown" and nav_taps > 0 and now >= next_semantic_probe:
+            semantic = _read_task_accessibility(adb)
+            next_semantic_probe = now + 5
+            semantic_surface = str(semantic.get("surface") or "unknown")
+            if semantic_surface in {"task_ready", "task_signed"}:
+                recovered = dict(evidence)
+                recovered.update(
+                    {
+                        "surface": semantic_surface,
+                        "semantic_proof": semantic.get("proof"),
+                    }
+                )
+                adb.logger.info(
+                    "任务视觉 unknown，已由语义树恢复 surface=%s proof=%s",
+                    semantic_surface,
+                    semantic.get("proof"),
+                )
+                return semantic_surface, recovered, png
+            selected_tab = str(semantic.get("selected_tab") or "")
+            if selected_tab in {"discover", "channel", "my"}:
+                if nav_taps >= 6:
+                    raise ScriptError("“任务”底栏点击重试超过安全上限")
+                adb.logger.info(
+                    "任务底栏触摸未到达目标，语义树仍选中 tab=%s；安全重试",
+                    selected_tab,
+                )
+                adb.tap(450, 1210)
+                nav_taps += 1
+                time.sleep(2.5)
+                continue
+
         time.sleep(1.5)
 
     raise ScriptError(
-        "等待界面超时 expected=['task_ready', 'task_signed', "
+        "等待界面超时 expected=['task_ready', 'task_signed', 'task_page', "
         f"'task_success_dialog'] last={last_surface}"
     )
 
 
 def _perform_daily_checkin(adb: AdbClient, worker: OcrWorker) -> dict[str, Any]:
-    """进入任务中心，按前后置模板幂等执行一次签到。"""
+    """进入任务中心，以视觉定位、语义树定状态，幂等执行一次签到。"""
 
     surface, evidence, _ = _navigate_task(adb, worker)
     if surface == "task_success_dialog":
         adb.key("4")
         surface, evidence, _ = _wait_surface(
-            adb, worker, {"task_signed"}, timeout=8
+            adb, worker, {"task_signed", "task_page"}, timeout=8
+        )
+    visual_surface = surface
+    surface, semantic_evidence = _wait_task_semantic_surface(adb)
+    if surface != visual_surface:
+        adb.logger.info(
+            "任务视觉状态由语义证据纠正 visual=%s semantic=%s",
+            visual_surface,
+            surface,
         )
     if surface == "task_signed":
         return {
             "checked_in": True,
             "already_checked_in": True,
             "checkin_confidence": evidence.get("confidence"),
+            "checkin_proof": semantic_evidence.get("proof"),
         }
 
-    # 只有 task_ready 前置模板通过才点击每日唯一动作；任何未知界面都不会点。
+    # 只有 accessibility 明确暴露顶部“签到”按钮才点击每日唯一动作；
+    # 历史奖励勾选、未知页面或单一视觉模板都不会触发。
     adb.tap(360, 247)
     surface, evidence, _ = _wait_surface(
         adb,
         worker,
-        {"task_success_dialog", "task_signed"},
+        {"task_success_dialog", "task_signed", "task_page"},
         timeout=60,
     )
     success_dialog_seen = surface == "task_success_dialog"
     if success_dialog_seen:
         adb.key("4")
         surface, evidence, _ = _wait_surface(
-            adb, worker, {"task_signed"}, timeout=10
+            adb, worker, {"task_signed", "task_page"}, timeout=10
         )
+    visual_surface = surface
+    surface, semantic_evidence = _wait_task_semantic_surface(adb)
     if surface != "task_signed":
-        raise ScriptError(f"签到点击后未进入已签到状态: {surface}")
+        raise ScriptError(
+            "签到点击后未得到今日已签到语义证据: "
+            f"visual={visual_surface}, semantic={surface}"
+        )
     return {
         "checked_in": True,
         "already_checked_in": False,
         "success_dialog_seen": success_dialog_seen,
         "checkin_confidence": evidence.get("confidence"),
+        "checkin_proof": semantic_evidence.get("proof"),
     }
 
 

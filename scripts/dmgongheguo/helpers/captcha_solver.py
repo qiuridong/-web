@@ -190,8 +190,9 @@ def inspect_ui(frame: np.ndarray, assets_dir: Path) -> dict[str, Any]:
     task_nav_path = ui_dir / "task-nav.png"
     task_layout_path = ui_dir / "task-layout.png"
     task_ready_path = ui_dir / "task-ready-top.png"
-    # “已签到”页顶部是账户可变的金币余额，不能作为状态模板。
-    # 改为只比较第一天奖励圆内的勾选标记，该区域与账户余额无关。
+    # “已签到”页顶部是账户可变的金币余额，不能作为固定状态模板。
+    # 第一日奖励圆里的勾选只表示历史上完成过第 1 天，不能单独证明今天
+    # 已签到；它只能在顶部“签到”按钮已经消失后作为页面识别的辅助证据。
     task_signed_path = ui_dir / "task-signed-first-day.png"
     task_paths = (
         task_nav_path,
@@ -223,18 +224,21 @@ def inspect_ui(frame: np.ndarray, assets_dir: Path) -> dict[str, Any]:
                 "confidence": min(task_nav_score, signed_score),
             }
         if task_nav_score >= 0.90 and task_layout_score >= 0.94:
-            # 顶部“签到”圆形按钮在签到前后保持不变，生产页面会同时得到
-            # ready=1.0 与 signed=1.0。已签到勾选是更具体的状态证据，必须
-            # 优先于仅证明“位于任务页”的顶部按钮；否则平分会落到 unknown。
-            if signed_score >= 0.88:
-                surface = "task_signed"
-                state_score = signed_score
-            elif ready_score >= 0.88:
+            # 顶部圆形“签到”按钮是“今天仍待签到”的直接证据，必须优先于
+            # 可能从前几天遗留的奖励勾选。主流程还会用 Android accessibility
+            # 语义树复核“签到”按钮或“金币”余额，视觉结果本身不作为最终成功证明。
+            if ready_score >= 0.88:
                 surface = "task_ready"
                 state_score = ready_score
+            elif signed_score >= 0.88:
+                surface = "task_signed"
+                state_score = signed_score
             else:
-                surface = "unknown"
-                state_score = 0.0
+                # 页面结构已经确定，但状态局部模板可能因余额、连续签到天数或
+                # App 微调而变化。把它交给主流程的 accessibility 语义复核，
+                # 不要退回 unknown 后盲等至超时。
+                surface = "task_page"
+                state_score = min(task_nav_score, task_layout_score)
             return {
                 "surface": surface,
                 "confidence": min(task_nav_score, task_layout_score, state_score),
