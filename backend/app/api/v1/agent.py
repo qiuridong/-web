@@ -44,6 +44,8 @@ from app.db.session import SessionLocal
 from app.deps import DBSession
 from app.middleware.agent_auth import AgentNode
 from app.runner.log_broker import get_log_broker
+from app.scheduler.executor import _extract_env_passthrough
+from app.scheduler.retry import compute_retry_delay, should_retry
 from app.schemas.node import (
     AgentHeartbeatRequest,
     AgentHeartbeatResponse,
@@ -121,6 +123,76 @@ def _peek_pending_actions(db: Session, node_id: int) -> PendingActions | None:
     return actions
 
 
+def _remote_run_attempt(db: Session, run: Run) -> int:
+    """推导远程 run 的尝试次数。
+
+    远程执行的 ``runs`` 表没有单独的 attempt 列, 重试 run 通过
+    ``trigger_type=retry`` + ``parent_run_id`` 串成链。首次 scheduled/manual
+    run 为 1, 每经过一个 retry 节点加 1; 损坏的父链用 visited 集合兜底。
+    """
+
+    attempt = 1
+    current = run
+    visited: set[int] = set()
+    while current.trigger_type == "retry" and current.parent_run_id:
+        if current.id in visited:
+            break
+        visited.add(current.id)
+        attempt += 1
+        parent = db.get(Run, current.parent_run_id)
+        if parent is None:
+            break
+        current = parent
+    return attempt
+
+
+def _schedule_remote_retry(db: Session, run: Run, instance: Instance | None) -> bool:
+    """为远程 Agent 的失败结果补上与本地执行一致的重试链。"""
+
+    if instance is None:
+        return False
+    attempt = _remote_run_attempt(db, run)
+    if not should_retry(
+        success=run.status == "success",
+        status=run.status,
+        attempt=attempt,
+        max_retries=int(instance.max_retries or 0),
+    ):
+        return False
+
+    try:
+        from app.deps import get_scheduler_service
+
+        scheduler = get_scheduler_service()
+        if getattr(scheduler, "_started", True) is False:
+            logger.warning(
+                "agent.result: Scheduler 未启动，无法安排重试 run={} attempt={}",
+                run.id,
+                attempt,
+            )
+            return False
+        delay = compute_retry_delay(
+            retry_interval_sec=int(instance.retry_interval_sec or 1),
+            attempt=attempt,
+        )
+        scheduler.schedule_retry(
+            instance_id=instance.id,
+            parent_run_id=run.id,
+            next_attempt=attempt + 1,
+            delay_sec=delay,
+        )
+        logger.info(
+            "agent.result: 已调度远程重试 run={} delay={}s next_attempt={}",
+            run.id,
+            delay,
+            attempt + 1,
+        )
+        return True
+    except Exception as exc:
+        logger.error("agent.result: 调度远程重试失败 run={} err={}", run.id, exc)
+        return False
+
+
 def _pluck_pending_task(db: Session, node_slug: str) -> Run | None:
     """查找一条分配给此节点的 pending run,如果有就 reserve(翻 running)并返回。
 
@@ -173,7 +245,7 @@ def _build_task_payload(db: Session, run: Run) -> AgentTaskPayload | None:
         script_version=script.version,
         timeout_sec=instance.timeout_sec or script.default_timeout_sec,
         trigger_type=run.trigger_type,
-        attempt=1,  # MVP-1 不支持 retry attempt 传递
+        attempt=_remote_run_attempt(db, run),
         config=config,
         env_passthrough=env_passthrough,
     )
@@ -339,7 +411,8 @@ async def agent_result(
     - 写 ``run.status / exit_code / result_message / result_data / stdout / stderr / finished_at``
     - 同步 ``instance.last_run_*`` 冗余字段
     - 关闭 SSE broker channel(end 事件)
-    - 触发通知 ``dispatch_run_event``
+    - 失败时按 instance 的 ``max_retries/retry_interval_sec`` 安排重试,
+      只有重试链结束后才触发通知 ``dispatch_run_event``
     """
     run = db.get(Run, run_id)
     if run is None:
@@ -425,17 +498,20 @@ async def agent_result(
         except Exception:  # noqa: BLE001
             pass
 
-    # 触发通知(safe wrapped — 不影响 agent 路径)
-    try:
-        from app.scheduler.executor import _dispatch_notification  # noqa: PLC0415
+    will_retry = _schedule_remote_retry(db, run, instance)
 
-        await _dispatch_notification(run_id, run.status)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "agent.result: dispatch_notification 失败 run={} {}",
-            run_id,
-            exc,
-        )
+    # 触发通知(safe wrapped — 不影响 agent 路径)
+    if not will_retry:
+        try:
+            from app.scheduler.executor import _dispatch_notification  # noqa: PLC0415
+
+            await _dispatch_notification(run_id, run.status)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "agent.result: dispatch_notification 失败 run={} {}",
+                run_id,
+                exc,
+            )
 
     logger.info(
         "agent.result: node {!r} run {} → {} ({})",
