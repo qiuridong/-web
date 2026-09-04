@@ -1,6 +1,6 @@
 """动漫共和国每日签到：ADB + 登录保活 + 本地验证码识别。
 
-1.2.8 修复历史勾选假成功，并从任一底栏页恢复偶发错位触摸。
+1.2.9 修复冷启动公告关闭后停在未识别底栏页，并从语义底栏继续导航。
 验证码识别器只提交高置信乘法题，加/减/除法和不完整 token 链全部刷新。
 """
 
@@ -15,8 +15,8 @@ import json
 import logging
 import os
 import re
-import signal
 import shutil
+import signal
 import subprocess
 import time
 import xml.etree.ElementTree as ET
@@ -52,6 +52,7 @@ OCR_MARKER_VERSION = "dmgongheguo-ocr-v1"
 ACCOUNT_BINDING_PATH = "/data/local/tmp/.dmgongheguo-account-binding-v1.json"
 ACCOUNT_BINDING_SCHEMA = 1
 TASK_UI_HIERARCHY_PATH = "/data/local/tmp/.dmgongheguo-task-ui.xml"
+ROOT_NAV_TABS = frozenset({"discover", "channel", "task", "my"})
 
 
 @dataclass
@@ -780,6 +781,7 @@ def _dismiss_announcements(
     started_at = time.monotonic()
     deadline = started_at + timeout
     next_progress_log = started_at + 30
+    next_semantic_probe = started_at + 5
     last_logged_surface = ""
     stale_logged = False
     while time.monotonic() < deadline:
@@ -812,10 +814,22 @@ def _dismiss_announcements(
             continue
         if surface != "unknown":
             return closed
-        if time.monotonic() >= next_progress_log:
+        now = time.monotonic()
+        if now >= next_semantic_probe:
+            semantic = _read_task_accessibility(adb)
+            selected_tab = str(semantic.get("selected_tab") or "")
+            if selected_tab in ROOT_NAV_TABS:
+                adb.logger.info(
+                    "App 已加载，语义底栏确认 selected_tab=%s proof=%s",
+                    selected_tab,
+                    semantic.get("proof"),
+                )
+                return closed
+            next_semantic_probe = now + 8
+        if now >= next_progress_log:
             adb.logger.info(
                 "App 冷启动仍在加载，已等待 %d 秒",
-                int(time.monotonic() - started_at),
+                int(now - started_at),
             )
             next_progress_log += 30
         time.sleep(1.5)
@@ -843,13 +857,13 @@ def _log_ui_evidence(adb: AdbClient, phase: str, evidence: dict[str, Any]) -> No
 
 
 def _close_announcement(adb: AdbClient, attempt: int) -> None:
-    """点击已确认的公告按钮；连续丢触摸时每第三次用 BACK 作安全兜底。"""
+    """点击公告的“不再显示”；连续丢触摸时每第三次用 BACK 作安全兜底。"""
 
     if (attempt + 1) % 3 == 0:
         adb.logger.info("公告关闭按钮连续丢触摸，改用 BACK 关闭当前弹窗")
         adb.key("4")
     else:
-        adb.tap(435, 1018)
+        adb.tap(587, 1018)
 
 
 def _navigate_my(
@@ -861,6 +875,7 @@ def _navigate_my(
     back_presses = 0
     announcement_streak = 0
     nav_taps = 0
+    next_semantic_probe = time.monotonic()
     last_surface = "unknown"
     last_logged_surface = ""
     while time.monotonic() < deadline:
@@ -907,6 +922,23 @@ def _navigate_my(
             nav_taps += 1
             time.sleep(2.5)
             continue
+
+        now = time.monotonic()
+        if surface == "unknown" and now >= next_semantic_probe:
+            semantic = _read_task_accessibility(adb)
+            selected_tab = str(semantic.get("selected_tab") or "")
+            next_semantic_probe = now + 5
+            if selected_tab in ROOT_NAV_TABS - {"my"}:
+                if nav_taps >= 6:
+                    raise ScriptError("“我的”底栏语义导航重试超过安全上限")
+                adb.logger.info(
+                    "视觉状态 unknown，语义底栏确认 selected_tab=%s，转到“我的”",
+                    selected_tab,
+                )
+                adb.tap(630, 1210)
+                nav_taps += 1
+                time.sleep(2.5)
+                continue
 
         time.sleep(1.5)
 

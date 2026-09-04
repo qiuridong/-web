@@ -302,7 +302,7 @@ def test_navigate_my_retries_lost_tap_and_closes_delayed_announcement(
     surface, _, _ = main._navigate_my(adb, FakeWorker())
 
     assert surface == "my_logged_out"
-    assert adb.taps == [(630, 1210), (435, 1018), (630, 1210)]
+    assert adb.taps == [(630, 1210), (587, 1018), (630, 1210)]
 
 
 def test_post_rebind_ready_wait_ignores_stale_logged_in_frame(monkeypatch):
@@ -353,6 +353,126 @@ def test_post_rebind_ready_wait_ignores_stale_logged_in_frame(monkeypatch):
     )
 
     assert closed == 0
+
+
+def test_app_ready_recovers_stacked_announcements_to_semantic_channel(monkeypatch):
+    main = load_main()
+
+    class Clock:
+        value = 0.0
+
+        def monotonic(self) -> float:
+            return self.value
+
+        def sleep(self, seconds: float) -> None:
+            self.value += seconds
+
+    class FakeAdb:
+        logger = logging.getLogger("test")
+
+        def __init__(self):
+            self.taps: list[tuple[int, int]] = []
+            self.keys: list[str] = []
+
+        def screenshot(self) -> bytes:
+            return b"fixture"
+
+        def tap(self, x: int, y: int) -> None:
+            self.taps.append((x, y))
+
+        def key(self, value: str) -> None:
+            self.keys.append(value)
+
+    class FakeWorker:
+        def __init__(self):
+            self.responses = iter(
+                [
+                    {"surface": "announcement", "confidence": 0.99},
+                    {"surface": "announcement", "confidence": 0.99},
+                    {"surface": "unknown", "confidence": 0.0},
+                ]
+            )
+
+        def request(self, mode: str, image: bytes):
+            assert mode == "ui" and image == b"fixture"
+            return next(self.responses)
+
+    clock = Clock()
+    monkeypatch.setattr(main.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(main.time, "sleep", clock.sleep)
+    monkeypatch.setattr(
+        main,
+        "_read_task_accessibility",
+        lambda _adb: {
+            "surface": "unknown",
+            "proof": "ambiguous_task_header",
+            "selected_tab": "channel",
+        },
+    )
+
+    adb = FakeAdb()
+    closed = main._dismiss_announcements(adb, FakeWorker(), timeout=30)
+
+    assert closed == 2
+    assert adb.taps == [(587, 1018), (587, 1018)]
+    assert adb.keys == []
+
+
+def test_navigate_my_recovers_unknown_channel_from_semantic_tab(monkeypatch):
+    main = load_main()
+
+    class Clock:
+        value = 0.0
+
+        def monotonic(self) -> float:
+            return self.value
+
+        def sleep(self, seconds: float) -> None:
+            self.value += seconds
+
+    class FakeAdb:
+        logger = logging.getLogger("test")
+
+        def __init__(self):
+            self.taps: list[tuple[int, int]] = []
+
+        def screenshot(self) -> bytes:
+            return b"fixture"
+
+        def tap(self, x: int, y: int) -> None:
+            self.taps.append((x, y))
+
+    class FakeWorker:
+        def __init__(self):
+            self.responses = iter(
+                [
+                    {"surface": "unknown", "confidence": 0.0},
+                    {"surface": "my_logged_in", "confidence": 0.99},
+                ]
+            )
+
+        def request(self, mode: str, image: bytes):
+            assert mode == "ui" and image == b"fixture"
+            return next(self.responses)
+
+    clock = Clock()
+    monkeypatch.setattr(main.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(main.time, "sleep", clock.sleep)
+    monkeypatch.setattr(
+        main,
+        "_read_task_accessibility",
+        lambda _adb: {
+            "surface": "unknown",
+            "proof": "ambiguous_task_header",
+            "selected_tab": "channel",
+        },
+    )
+
+    adb = FakeAdb()
+    surface, _, _ = main._navigate_my(adb, FakeWorker())
+
+    assert surface == "my_logged_in"
+    assert adb.taps == [(630, 1210)]
 
 
 def test_dry_run_short_circuits_before_adb_or_ocr():
@@ -446,7 +566,7 @@ def test_navigate_task_retries_lost_tap_and_closes_delayed_announcement(
     surface, _, _ = main._navigate_task(adb, FakeWorker())
 
     assert surface == "task_signed"
-    assert adb.taps == [(450, 1210), (435, 1018), (450, 1210)]
+    assert adb.taps == [(450, 1210), (587, 1018), (450, 1210)]
 
 
 def test_navigate_task_recovers_unknown_when_semantics_select_other_tab(
@@ -556,7 +676,7 @@ def test_manifest_and_asset_contract_pass_backend_validation():
 
     manifest = parse_manifest(MANIFEST_PATH)
     assert manifest.slug == "dmgongheguo"
-    assert str(manifest.version) == "1.2.8"
+    assert str(manifest.version) == "1.2.9"
     assert manifest.default_timeout_sec == 1200
     keys = [field.key for field in manifest.fields]
     assert keys[:2] == ["account", "password"]
